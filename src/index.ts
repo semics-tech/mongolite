@@ -7,18 +7,23 @@ export * from './types';
 
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 
+type MongoLiteOptions = {
+  verbose?: boolean | ((...args: any[]) => void);
+};
 /**
  * MongoLite class is the main entry point for interacting with the SQLite-backed database.
  */
 export class MongoLite {
   private db: SQLiteDB;
+  private options: MongoLiteOptions;
 
   /**
    * Creates a new MongoLite client instance.
    * @param dbPathOrOptions Path to the SQLite database file or an options object.
    */
-  constructor(dbPathOrOptions: string | MongoLiteClientOptions) {
+  constructor(dbPathOrOptions: string | MongoLiteClientOptions, options: MongoLiteOptions = {}) {
     this.db = new SQLiteDB(dbPathOrOptions);
+    this.options = options;
   }
 
   /**
@@ -42,6 +47,6 @@ export class MongoLite {
    * @returns A MongoLiteCollection instance.
    */
   collection<T extends DocumentWithId = DocumentWithId>(name: string): MongoLiteCollection<T> {
-    return new MongoLiteCollection<T>(this.db, name);
+    return new MongoLiteCollection<T>(this.db, name, this.options);
   }
 }

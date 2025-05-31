@@ -34,7 +34,8 @@ export class FindCursor<T extends DocumentWithId> {
   constructor(
     private db: SQLiteDB,
     private collectionName: string,
-    initialFilter: Filter<T>
+    initialFilter: Filter<T>,
+    private readonly options: { verbose?: boolean } = {}
   ) {
     this.queryParts = this.buildSelectQuery(initialFilter);
   }
@@ -102,27 +103,27 @@ export class FindCursor<T extends DocumentWithId> {
               switch (op) {
                 case '$eq':
                   conditions.push(`json_extract(data, ${jsonPath}) = ?`);
-                  params.push(JSON.stringify(opValue));
+                  params.push(opValue);
                   break;
                 case '$ne':
                   conditions.push(`json_extract(data, ${jsonPath}) != ?`);
-                  params.push(JSON.stringify(opValue));
+                  params.push(opValue);
                   break;
                 case '$gt':
                   conditions.push(`json_extract(data, ${jsonPath}) > ?`);
-                  params.push(JSON.stringify(opValue));
+                  params.push(opValue);
                   break;
                 case '$gte':
                   conditions.push(`json_extract(data, ${jsonPath}) >= ?`);
-                  params.push(JSON.stringify(opValue));
+                  params.push(opValue);
                   break;
                 case '$lt':
                   conditions.push(`json_extract(data, ${jsonPath}) < ?`);
-                  params.push(JSON.stringify(opValue));
+                  params.push(opValue);
                   break;
                 case '$lte':
                   conditions.push(`json_extract(data, ${jsonPath}) <= ?`);
-                  params.push(JSON.stringify(opValue));
+                  params.push(opValue);
                   break;
                 case '$in':
                   if (Array.isArray(opValue) && opValue.length > 0) {
@@ -130,7 +131,7 @@ export class FindCursor<T extends DocumentWithId> {
                       .map(() => `json_extract(data, ${jsonPath}) = ?`)
                       .join(' OR ');
                     conditions.push(`(${inConditions})`);
-                    opValue.forEach((val) => params.push(JSON.stringify(val)));
+                    opValue.forEach((val) => params.push(val));
                   } else {
                     conditions.push('1=0'); // Empty $in array, nothing will match
                   }
@@ -141,7 +142,7 @@ export class FindCursor<T extends DocumentWithId> {
                       .map(() => `json_extract(data, ${jsonPath}) != ?`)
                       .join(' AND ');
                     conditions.push(`(${ninConditions})`);
-                    opValue.forEach((val) => params.push(JSON.stringify(val)));
+                    opValue.forEach((val) => params.push(val));
                   }
                   // Empty $nin array means match everything, so no condition needed
                   break;
@@ -170,6 +171,11 @@ export class FindCursor<T extends DocumentWithId> {
     const params: unknown[] = [];
     const whereClause = this.buildWhereClause(filter, params);
     const sql = `SELECT _id, data FROM "${this.collectionName}" WHERE ${whereClause}`;
+
+    if (this.options.verbose) {
+      console.log(`SQL Query: ${sql}`);
+      console.log(`Parameters: ${JSON.stringify(params)}`);
+    }
     return { sql, params };
   }
 
@@ -362,7 +368,8 @@ export class FindCursor<T extends DocumentWithId> {
 export class MongoLiteCollection<T extends DocumentWithId> {
   constructor(
     private db: SQLiteDB,
-    public readonly name: string
+    public readonly name: string,
+    private readonly options: { verbose?: boolean } = {}
   ) {
     this.ensureTable().catch((err) => {
       // This error should be handled or logged appropriately.
@@ -483,7 +490,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   find(filter: Filter<T> = {}): FindCursor<T> {
     // ensureTable is called by operations on the cursor or by constructor
-    return new FindCursor<T>(this.db, this.name, filter);
+    return new FindCursor<T>(this.db, this.name, filter, this.options);
   }
 
   /**
@@ -745,7 +752,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
               const value = opArgs[path];
               const currentValue = this.getNestedValue(currentDoc, path);
               if (Array.isArray(currentValue)) {
-              // Simple equality pull
+                // Simple equality pull
                 const newArray = currentValue.filter((item) => {
                   if (typeof item === 'object' && typeof value === 'object') {
                     // For objects, do a deep comparison (simplified)
