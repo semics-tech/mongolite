@@ -30,8 +30,8 @@ jobs:
     - name: Build TypeScript
       run: npm run build
 
-    # - name: Lint code (Optional, but recommended)
-    #   run: npm run lint
+    - name: Lint code (Optional, but recommended)
+      run: npm run lint
 
     - name: Run tests
       run: npm test
