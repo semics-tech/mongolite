@@ -15,6 +15,31 @@ A MongoDB-like client that uses SQLite as its underlying persistent store. Writt
 * Written in TypeScript with strong typing.
 * 100% test coverage (aiming for).
 
+## Development
+
+### Build Verification
+
+The package includes a comprehensive build verification system that ensures the compiled output works correctly in various contexts:
+
+1. **Module Export Test**: Verifies that all classes and interfaces are correctly exported from the compiled module.
+
+2. **Internal Module Resolution Test**: Ensures that all internal module imports work correctly in the compiled output.
+
+3. **Third-Party Usage Test**: Simulates installing the package in a separate project to verify it works correctly when used as a dependency.
+
+```bash
+# Build and verify exports
+npm run verify-build
+
+# Test the package as a third-party dependency
+npm run test-third-party
+
+# Run all tests including linting, unit tests, and build verification
+npm run test:all
+```
+
+These tests help prevent common module resolution issues that can occur in ESM packages.
+
 ## Installation
 
 ```bash

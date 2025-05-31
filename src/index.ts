@@ -1,9 +1,9 @@
-import { SQLiteDB, MongoLiteOptions as DBMongoLiteOptions } from './db';
-import { MongoLiteCollection } from './collection';
-import { DocumentWithId } from './types';
+import { SQLiteDB, MongoLiteOptions as DBMongoLiteOptions } from './db.js';
+import { MongoLiteCollection } from './collection.js';
+import { DocumentWithId } from './types.js';
 
-export { MongoLiteCollection } from './collection';
-export * from './types';
+export { MongoLiteCollection } from './collection.js';
+export * from './types.js';
 
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 

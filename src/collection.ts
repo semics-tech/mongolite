@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { SQLiteDB } from './db';
+import { SQLiteDB } from './db.js';
 import {
   DocumentWithId,
   Filter,
@@ -10,7 +10,7 @@ import {
   QueryOperators,
   SortCriteria,
   Projection,
-} from './types';
+} from './types.js';
 
 interface SQLiteRow {
   _id: string;

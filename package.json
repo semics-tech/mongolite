@@ -10,7 +10,10 @@
     "test": "node --import tsx tests/*.test.ts",
     "prepare": "npm run build",
     "lint": "eslint src/**/*.ts tests/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts tests/**/*.ts --fix"
+    "lint:fix": "eslint src/**/*.ts tests/**/*.ts --fix",
+    "verify-build": "node --import tsx scripts/verify-build.js",
+    "test-third-party": "node scripts/test-third-party-usage.js",
+    "test:all": "npm run lint && npm run test && npm run verify-build && npm run test-third-party"
   },
   "repository": {
     "type": "git",
