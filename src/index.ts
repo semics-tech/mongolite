@@ -8,7 +8,7 @@ export * from './types';
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 
 type MongoLiteOptions = {
-  verbose?: boolean | ((...args: any[]) => void);
+  verbose?: boolean;
 };
 /**
  * MongoLite class is the main entry point for interacting with the SQLite-backed database.

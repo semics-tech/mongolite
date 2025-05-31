@@ -547,7 +547,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
     }
 
-    let currentDoc = JSON.parse(rowToUpdate.data);
+    const currentDoc = JSON.parse(rowToUpdate.data);
     let modified = false;
 
     // Process update operators
@@ -640,11 +640,6 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     }
 
     if (modified) {
-      // Get the modifiedCount
-      const matchedRecordSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
-      const matchedRecord = await this.db.get<{ count: number }>(matchedRecordSql, paramsForSelect);
-      const matchedCount = matchedRecord?.count || 0;
-
       // Update the document in SQLite
       const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
       const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
@@ -653,8 +648,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       return {
         acknowledged: true,
         matchedCount: 1,
-        modifiedCount: matchedCount,
-        upsertedId: null, // We don't support upsert yet
+        modifiedCount: 1, // Since we found and modified exactly one document
+        upsertedId: null,
       };
     }
 
@@ -867,7 +862,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     );
 
     // Get the number of documents that would be deleted
-    const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
+    const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause} LIMIT 1`;
     const countResult = await this.db.get<{ count: number }>(countSql, paramsForDelete);
 
     const deleteSql = `
@@ -876,7 +871,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     `;
 
     await this.db.run(deleteSql, paramsForDelete);
-    return { acknowledged: true, deletedCount: countResult ? 1 : 0 };
+    return { acknowledged: true, deletedCount: countResult?.count ? 1 : 0 };
   }
 
   /**
