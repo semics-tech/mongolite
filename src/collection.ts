@@ -505,6 +505,33 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     const rowToUpdate = await this.db.get<SQLiteRow>(selectSql, paramsForSelect);
 
+    if (!rowToUpdate && !options.upsert) {
+      // If no document found and upsert is not requested, return no changes
+      return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
+    }
+    // If no document found and upsert is requested, create a new document
+    if (!rowToUpdate && options.upsert) {
+      const newDocId = uuidv4();
+      const newDoc = { _id: newDocId, ...update.$set } as T; // Assuming $set is used for upsert
+      // Ensure _id is set
+      const jsonData = JSON.stringify(newDoc);
+      const insertSql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
+      try {
+        await this.db.run(insertSql, [newDocId, jsonData]);
+        return {
+          acknowledged: true,
+          matchedCount: 0,
+          modifiedCount: 0,
+          upsertedId: newDocId,
+        };
+      } catch (error) {
+        console.error(`Error inserting document during upsert in ${this.name}:`, error);
+        if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
+          throw new Error(`Duplicate _id during upsert: ${newDocId}`);
+        }
+        throw error; // Re-throw other errors
+      }
+    }
     if (!rowToUpdate) {
       return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
     }
