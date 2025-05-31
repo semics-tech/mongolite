@@ -34,7 +34,7 @@ jobs:
     #   run: npm run lint
 
     - name: Run tests
-      run: npm test -- --coverage # Run tests with coverage
+      run: npm test
 
     # Optional: Upload coverage to Coveralls or Codecov
     # - name: Upload coverage to Coveralls
