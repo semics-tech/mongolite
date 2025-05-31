@@ -108,8 +108,12 @@ export class FindCursor<T extends DocumentWithId> {
                   params.push(opValue);
                   break;
                 case '$ne':
-                  conditions.push(`json_extract(data, ${jsonPath}) != ?`);
-                  params.push(opValue);
+                  if (opValue === null) {
+                    conditions.push(`json_extract(data, ${jsonPath}) IS NOT NULL`);
+                  } else {
+                    conditions.push(`json_extract(data, ${jsonPath}) != ?`);
+                    params.push(opValue);
+                  }
                   break;
                 case '$gt':
                   conditions.push(`json_extract(data, ${jsonPath}) > ?`);
@@ -160,8 +164,12 @@ export class FindCursor<T extends DocumentWithId> {
             }
           } else {
             // Direct equality for non-object values
-            conditions.push(`json_extract(data, ${jsonPath}) = ?`);
-            params.push(value);
+            if (value === null) {
+              conditions.push(`json_extract(data, ${jsonPath}) IS NULL`);
+            } else {
+              conditions.push(`json_extract(data, ${jsonPath}) = ?`);
+              params.push(value);
+            }
           }
         }
       }
