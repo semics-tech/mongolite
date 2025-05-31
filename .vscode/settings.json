@@ -1,8 +1,8 @@
 {
   "nodejs-testing.extensions": [
     {
-      "extensions": ["mjs", "cjs", "js"],
-      "parameters": []
+      "extensions": ["ts"],
+      "parameters": ["--import", "tsx"]
     }
   ]
 }
