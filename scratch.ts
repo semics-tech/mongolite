@@ -1,4 +1,4 @@
-import { MongoLite } from './dist/';
+import { MongoLite } from './src/index';
 import path from 'path';
 
 interface User {
