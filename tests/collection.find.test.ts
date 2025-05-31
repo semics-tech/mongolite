@@ -224,5 +224,19 @@ describe('MongoLiteCollection - Find Operations', () => {
         _id: '2',
       });
     });
+
+    it('handle query with filter and $or operator', async () => {
+      const docs = await collection
+        .find({
+          value: 20,
+          $or: [{ value: { $gte: 20 } }, { tags: { $exists: true } }],
+        })
+        .toArray();
+
+      // Should match doc2 and doc4 (both have value 20)
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === '2')); // doc2
+      assert.ok(docs.some((d) => d._id === '4')); // doc4
+    });
   });
 });

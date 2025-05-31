@@ -8,7 +8,6 @@ import {
   UpdateResult,
   DeleteResult,
   QueryOperators,
-  UpdateOperators,
   SortCriteria,
   Projection,
 } from './types';
@@ -48,24 +47,27 @@ export class FindCursor<T extends DocumentWithId> {
     const conditions: string[] = [];
 
     // Handle $and, $or, $nor logical operators at the top level
-    if (filter.$and) {
-      const andConditions = filter.$and
-        .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
-        .join(' AND ');
-      conditions.push(`(${andConditions})`);
-    } else if (filter.$or) {
-      const orConditions = filter.$or
-        .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
-        .join(' OR ');
-      conditions.push(`(${orConditions})`);
-    } else if (filter.$nor) {
-      const norConditions = filter.$nor
-        .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
-        .join(' OR ');
-      conditions.push(`NOT (${norConditions})`);
-    } else {
-      // Handle field conditions
-      for (const key in filter) {
+    for (const key of Object.keys(filter)) {
+      if (key === '$and' && filter.$and) {
+        const condition = filter.$and;
+        const andConditions = condition
+          .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
+          .join(' AND ');
+        conditions.push(`(${andConditions})`);
+      } else if (key === '$or' && filter.$or) {
+        const condition = filter.$or;
+        const orConditions = condition
+          .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
+          .join(' OR ');
+        conditions.push(`(${orConditions})`);
+      } else if (key === '$nor' && filter.$nor) {
+        const condition = filter.$nor;
+        const norConditions = condition
+          .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
+          .join(' OR ');
+        conditions.push(`NOT (${norConditions})`);
+      } else {
+        // Handle field conditions
         if (key.startsWith('$')) continue; // Skip logical operators already handled
 
         const value = filter[key as keyof Filter<T>];
@@ -682,7 +684,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     let modifiedCount = 0;
     const updatedIds: string[] = [];
     for (const rowToUpdate of rowsToUpdate) {
-      let currentDoc = JSON.parse(rowToUpdate.data);
+      const currentDoc = JSON.parse(rowToUpdate.data);
       let modified = false;
       // Process update operators
       for (const operator in update) {
