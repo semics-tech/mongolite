@@ -101,33 +101,33 @@ export class FindCursor<T extends DocumentWithId> {
               const opValue = (value as QueryOperators<any>)[op as keyof QueryOperators<any>];
               switch (op) {
                 case '$eq':
-                  conditions.push(`json_extract(data, ${jsonPath}) = json(?)`);
+                  conditions.push(`json_extract(data, ${jsonPath}) = ?`);
                   params.push(JSON.stringify(opValue));
                   break;
                 case '$ne':
-                  conditions.push(`json_extract(data, ${jsonPath}) != json(?)`);
+                  conditions.push(`json_extract(data, ${jsonPath}) != ?`);
                   params.push(JSON.stringify(opValue));
                   break;
                 case '$gt':
-                  conditions.push(`json_extract(data, ${jsonPath}) > json(?)`);
+                  conditions.push(`json_extract(data, ${jsonPath}) > ?`);
                   params.push(JSON.stringify(opValue));
                   break;
                 case '$gte':
-                  conditions.push(`json_extract(data, ${jsonPath}) >= json(?)`);
+                  conditions.push(`json_extract(data, ${jsonPath}) >= ?`);
                   params.push(JSON.stringify(opValue));
                   break;
                 case '$lt':
-                  conditions.push(`json_extract(data, ${jsonPath}) < json(?)`);
+                  conditions.push(`json_extract(data, ${jsonPath}) < ?`);
                   params.push(JSON.stringify(opValue));
                   break;
                 case '$lte':
-                  conditions.push(`json_extract(data, ${jsonPath}) <= json(?)`);
+                  conditions.push(`json_extract(data, ${jsonPath}) <= ?`);
                   params.push(JSON.stringify(opValue));
                   break;
                 case '$in':
                   if (Array.isArray(opValue) && opValue.length > 0) {
                     const inConditions = opValue
-                      .map(() => `json_extract(data, ${jsonPath}) = json(?)`)
+                      .map(() => `json_extract(data, ${jsonPath}) = ?`)
                       .join(' OR ');
                     conditions.push(`(${inConditions})`);
                     opValue.forEach((val) => params.push(JSON.stringify(val)));
@@ -138,7 +138,7 @@ export class FindCursor<T extends DocumentWithId> {
                 case '$nin':
                   if (Array.isArray(opValue) && opValue.length > 0) {
                     const ninConditions = opValue
-                      .map(() => `json_extract(data, ${jsonPath}) != json(?)`)
+                      .map(() => `json_extract(data, ${jsonPath}) != ?`)
                       .join(' AND ');
                     conditions.push(`(${ninConditions})`);
                     opValue.forEach((val) => params.push(JSON.stringify(val)));
@@ -157,8 +157,8 @@ export class FindCursor<T extends DocumentWithId> {
             }
           } else {
             // Direct equality for non-object values
-            conditions.push(`json_extract(data, ${jsonPath}) = json(?)`);
-            params.push(JSON.stringify(value));
+            conditions.push(`json_extract(data, ${jsonPath}) = ?`);
+            params.push(value);
           }
         }
       }
@@ -492,7 +492,11 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param update The modifications to apply.
    * @returns {Promise<UpdateResult>} An object describing the outcome.
    */
-  async updateOne(filter: Filter<T>, update: UpdateFilter<T>): Promise<UpdateResult> {
+  async updateOne(
+    filter: Filter<T>,
+    update: UpdateFilter<T>,
+    options: { upsert?: boolean } = {}
+  ): Promise<UpdateResult> {
     await this.ensureTable();
 
     // Find the document first (only one)
