@@ -1,4 +1,4 @@
-import { MongoLite } from './src/index';
+import { MongoLite } from './dist/index.js';
 import path from 'path';
 
 interface User {
@@ -16,7 +16,7 @@ interface User {
 async function main() {
   // Initialize the client.
   // You can use ':memory:' for an in-memory database, or provide a file path.
-  const dbPath = path.join(__dirname, 'mydatabase.sqlite');
+  const dbPath = path.join('./mydatabase.sqlite');
   const client = new MongoLite(dbPath);
 
   try {
