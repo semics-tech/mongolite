@@ -881,10 +881,15 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       filter,
       paramsForDelete
     );
+
+    // Get the number of documents that would be deleted
+    const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
+    const countResult = await this.db.get<{ count: number }>(countSql, paramsForDelete);
+
     const deleteSql = `DELETE FROM "${this.name}" WHERE ${whereClause}`;
 
-    const result = await this.db.run(deleteSql, paramsForDelete);
-    return { acknowledged: true, deletedCount: result.changes || 0 };
+    await this.db.run(deleteSql, paramsForDelete);
+    return { acknowledged: true, deletedCount: countResult ? countResult.count : 0 };
   }
 
   /**
