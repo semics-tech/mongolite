@@ -1,0 +1,22 @@
+{
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.d.ts",
+    "dist/**",
+    "node_modules/**",
+    "tests/**",
+    "examples/**",
+    "scripts/**"
+  ],
+  "all": true,
+  "extension": [
+    ".ts"
+  ],
+  "reporter": [
+    "text",
+    "lcov"
+  ],
+  "check-coverage": false
+}
