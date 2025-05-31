@@ -48,102 +48,120 @@ export class FindCursor<T extends DocumentWithId> {
 
     // Handle $and, $or, $nor logical operators at the top level
     if (filter.$and) {
-        const andConditions = filter.$and.map(subFilter => `(${this.buildWhereClause(subFilter, params)})`).join(' AND ');
-        conditions.push(`(${andConditions})`);
+      const andConditions = filter.$and
+        .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
+        .join(' AND ');
+      conditions.push(`(${andConditions})`);
     } else if (filter.$or) {
-        const orConditions = filter.$or.map(subFilter => `(${this.buildWhereClause(subFilter, params)})`).join(' OR ');
-        conditions.push(`(${orConditions})`);
+      const orConditions = filter.$or
+        .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
+        .join(' OR ');
+      conditions.push(`(${orConditions})`);
     } else if (filter.$nor) {
-        const norConditions = filter.$nor.map(subFilter => `(${this.buildWhereClause(subFilter, params)})`).join(' OR ');
-        conditions.push(`NOT (${norConditions})`);
+      const norConditions = filter.$nor
+        .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
+        .join(' OR ');
+      conditions.push(`NOT (${norConditions})`);
     } else {
-        // Handle field conditions
-        for (const key in filter) {
-            if (key.startsWith('$')) continue; // Skip logical operators already handled
+      // Handle field conditions
+      for (const key in filter) {
+        if (key.startsWith('$')) continue; // Skip logical operators already handled
 
-            const value = filter[key as keyof Filter<T>];
-            if (key === '_id') {
-                if (typeof value === 'string') {
-                    conditions.push('_id = ?');
-                    params.push(value);
-                } else if (typeof value === 'object' && value !== null && (value as QueryOperators<string>).$in) {
-                    const inValues = (value as QueryOperators<string>).$in as string[];
-                    if (inValues.length > 0) {
-                        conditions.push(`_id IN (${inValues.map(() => '?').join(',')})`);
-                        params.push(...inValues);
-                    } else {
-                        conditions.push('1=0'); // No values in $in means nothing matches
-                    }
-                } else if (typeof value === 'object' && value !== null && (value as QueryOperators<string>).$ne) {
-                    conditions.push('_id <> ?');
-                    params.push((value as QueryOperators<string>).$ne);
-                }
-                // Add other _id specific operators if needed
+        const value = filter[key as keyof Filter<T>];
+        if (key === '_id') {
+          if (typeof value === 'string') {
+            conditions.push('_id = ?');
+            params.push(value);
+          } else if (
+            typeof value === 'object' &&
+            value !== null &&
+            (value as QueryOperators<string>).$in
+          ) {
+            const inValues = (value as QueryOperators<string>).$in as string[];
+            if (inValues.length > 0) {
+              conditions.push(`_id IN (${inValues.map(() => '?').join(',')})`);
+              params.push(...inValues);
             } else {
-                const jsonPath = this.parseJsonPath(key);
-                if (typeof value === 'object' && value !== null) {
-                    // Handle operators like $gt, $lt, $in, $exists, $not etc.
-                    for (const op in value) {
-                        const opValue = (value as QueryOperators<any>)[op as keyof QueryOperators<any>];
-                        switch (op) {
-                            case '$eq':
-                                conditions.push(`json_extract(data, ${jsonPath}) = json(?)`);
-                                params.push(JSON.stringify(opValue));
-                                break;
-                            case '$ne':
-                                conditions.push(`json_extract(data, ${jsonPath}) != json(?)`);
-                                params.push(JSON.stringify(opValue));
-                                break;
-                            case '$gt':
-                                conditions.push(`json_extract(data, ${jsonPath}) > json(?)`);
-                                params.push(JSON.stringify(opValue));
-                                break;
-                            case '$gte':
-                                conditions.push(`json_extract(data, ${jsonPath}) >= json(?)`);
-                                params.push(JSON.stringify(opValue));
-                                break;
-                            case '$lt':
-                                conditions.push(`json_extract(data, ${jsonPath}) < json(?)`);
-                                params.push(JSON.stringify(opValue));
-                                break;
-                            case '$lte':
-                                conditions.push(`json_extract(data, ${jsonPath}) <= json(?)`);
-                                params.push(JSON.stringify(opValue));
-                                break;
-                            case '$in':
-                                if (Array.isArray(opValue) && opValue.length > 0) {
-                                    const inConditions = opValue.map(() => `json_extract(data, ${jsonPath}) = json(?)`).join(' OR ');
-                                    conditions.push(`(${inConditions})`);
-                                    opValue.forEach(val => params.push(JSON.stringify(val)));
-                                } else {
-                                    conditions.push('1=0'); // Empty $in array, nothing will match
-                                }
-                                break;
-                            case '$nin':
-                                if (Array.isArray(opValue) && opValue.length > 0) {
-                                    const ninConditions = opValue.map(() => `json_extract(data, ${jsonPath}) != json(?)`).join(' AND ');
-                                    conditions.push(`(${ninConditions})`);
-                                    opValue.forEach(val => params.push(JSON.stringify(val)));
-                                }
-                                // Empty $nin array means match everything, so no condition needed
-                                break;
-                            case '$exists':
-                                if (opValue === true) {
-                                    conditions.push(`json_extract(data, ${jsonPath}) IS NOT NULL`);
-                                } else {
-                                    conditions.push(`json_extract(data, ${jsonPath}) IS NULL`);
-                                }
-                                break;
-                            // Add other operators as needed
-                        }
-                    }
-                } else {
-                    // Direct equality for non-object values
-                    conditions.push(`json_extract(data, ${jsonPath}) = json(?)`);
-                    params.push(JSON.stringify(value));
-                }
+              conditions.push('1=0'); // No values in $in means nothing matches
             }
+          } else if (
+            typeof value === 'object' &&
+            value !== null &&
+            (value as QueryOperators<string>).$ne
+          ) {
+            conditions.push('_id <> ?');
+            params.push((value as QueryOperators<string>).$ne);
+          }
+          // Add other _id specific operators if needed
+        } else {
+          const jsonPath = this.parseJsonPath(key);
+          if (typeof value === 'object' && value !== null) {
+            // Handle operators like $gt, $lt, $in, $exists, $not etc.
+            for (const op in value) {
+              const opValue = (value as QueryOperators<any>)[op as keyof QueryOperators<any>];
+              switch (op) {
+                case '$eq':
+                  conditions.push(`json_extract(data, ${jsonPath}) = json(?)`);
+                  params.push(JSON.stringify(opValue));
+                  break;
+                case '$ne':
+                  conditions.push(`json_extract(data, ${jsonPath}) != json(?)`);
+                  params.push(JSON.stringify(opValue));
+                  break;
+                case '$gt':
+                  conditions.push(`json_extract(data, ${jsonPath}) > json(?)`);
+                  params.push(JSON.stringify(opValue));
+                  break;
+                case '$gte':
+                  conditions.push(`json_extract(data, ${jsonPath}) >= json(?)`);
+                  params.push(JSON.stringify(opValue));
+                  break;
+                case '$lt':
+                  conditions.push(`json_extract(data, ${jsonPath}) < json(?)`);
+                  params.push(JSON.stringify(opValue));
+                  break;
+                case '$lte':
+                  conditions.push(`json_extract(data, ${jsonPath}) <= json(?)`);
+                  params.push(JSON.stringify(opValue));
+                  break;
+                case '$in':
+                  if (Array.isArray(opValue) && opValue.length > 0) {
+                    const inConditions = opValue
+                      .map(() => `json_extract(data, ${jsonPath}) = json(?)`)
+                      .join(' OR ');
+                    conditions.push(`(${inConditions})`);
+                    opValue.forEach((val) => params.push(JSON.stringify(val)));
+                  } else {
+                    conditions.push('1=0'); // Empty $in array, nothing will match
+                  }
+                  break;
+                case '$nin':
+                  if (Array.isArray(opValue) && opValue.length > 0) {
+                    const ninConditions = opValue
+                      .map(() => `json_extract(data, ${jsonPath}) != json(?)`)
+                      .join(' AND ');
+                    conditions.push(`(${ninConditions})`);
+                    opValue.forEach((val) => params.push(JSON.stringify(val)));
+                  }
+                  // Empty $nin array means match everything, so no condition needed
+                  break;
+                case '$exists':
+                  if (opValue === true) {
+                    conditions.push(`json_extract(data, ${jsonPath}) IS NOT NULL`);
+                  } else {
+                    conditions.push(`json_extract(data, ${jsonPath}) IS NULL`);
+                  }
+                  break;
+                // Add other operators as needed
+              }
+            }
+          } else {
+            // Direct equality for non-object values
+            conditions.push(`json_extract(data, ${jsonPath}) = json(?)`);
+            params.push(JSON.stringify(value));
+          }
         }
+      }
     }
     return conditions.length > 0 ? conditions.join(' AND ') : '1=1';
   }
@@ -161,7 +179,7 @@ export class FindCursor<T extends DocumentWithId> {
    * @returns The `FindCursor` instance for chaining.
    */
   public limit(count: number): this {
-    if (count < 0) throw new Error("Limit must be a non-negative number.");
+    if (count < 0) throw new Error('Limit must be a non-negative number.');
     this.limitCount = count;
     return this;
   }
@@ -172,7 +190,7 @@ export class FindCursor<T extends DocumentWithId> {
    * @returns The `FindCursor` instance for chaining.
    */
   public skip(count: number): this {
-    if (count < 0) throw new Error("Skip must be a non-negative number.");
+    if (count < 0) throw new Error('Skip must be a non-negative number.');
     this.skipCount = count;
     return this;
   }
@@ -207,87 +225,89 @@ export class FindCursor<T extends DocumentWithId> {
 
     // Determine if it's an inclusion or exclusion projection
     for (const key in this.projectionFields) {
-        if (key === '_id') continue;
-        if (this.projectionFields[key as keyof T] === 1) {
-            hasExplicitInclusion = true;
-            break;
-        }
-        if (this.projectionFields[key as keyof T] === 0) {
-            includeMode = false;
-            // No break here, need to check all for explicit inclusions if _id is also 0
-        }
-    }
-    
-    if (this.projectionFields._id === 0 && !hasExplicitInclusion) {
-        // If _id is excluded and no other fields are explicitly included,
-        // it's an exclusion projection where other fields are implicitly included.
+      if (key === '_id') continue;
+      if (this.projectionFields[key as keyof T] === 1) {
+        hasExplicitInclusion = true;
+        break;
+      }
+      if (this.projectionFields[key as keyof T] === 0) {
         includeMode = false;
-    } else if (hasExplicitInclusion) {
-        includeMode = true;
+        // No break here, need to check all for explicit inclusions if _id is also 0
+      }
     }
 
-    if (includeMode) { // Inclusion mode
-        for (const key in this.projectionFields) {
-            if (this.projectionFields[key as keyof T] === 1) {
-                if (key.includes('.')) {
-                    // Handle nested paths for inclusion (basic implementation)
-                    const path = key.split('.');
-                    let current: any = doc;
-                    let target: any = projectedDoc;
+    if (this.projectionFields._id === 0 && !hasExplicitInclusion) {
+      // If _id is excluded and no other fields are explicitly included,
+      // it's an exclusion projection where other fields are implicitly included.
+      includeMode = false;
+    } else if (hasExplicitInclusion) {
+      includeMode = true;
+    }
 
-                    // Navigate to the last parent in the path
-                    for (let i = 0; i < path.length - 1; i++) {
-                        const segment = path[i];
-                        if (current[segment] === undefined) break;
-                        
-                        if (target[segment] === undefined) {
-                            target[segment] = {};
-                        }
-                        
-                        current = current[segment];
-                        target = target[segment];
-                    }
-                    
-                    // Set the final property if we reached it
-                    const lastSegment = path[path.length - 1];
-                    if (current && current[lastSegment] !== undefined) {
-                        target[lastSegment] = current[lastSegment];
-                    }
-                } else if (key in doc) {
-                    projectedDoc[key as keyof T] = doc[key as keyof T];
-                }
+    if (includeMode) {
+      // Inclusion mode
+      for (const key in this.projectionFields) {
+        if (this.projectionFields[key as keyof T] === 1) {
+          if (key.includes('.')) {
+            // Handle nested paths for inclusion (basic implementation)
+            const path = key.split('.');
+            let current: any = doc;
+            let target: any = projectedDoc;
+
+            // Navigate to the last parent in the path
+            for (let i = 0; i < path.length - 1; i++) {
+              const segment = path[i];
+              if (current[segment] === undefined) break;
+
+              if (target[segment] === undefined) {
+                target[segment] = {};
+              }
+
+              current = current[segment];
+              target = target[segment];
             }
-        }
-        // _id is included by default in inclusion mode, unless explicitly excluded
-        if (this.projectionFields._id !== 0 && '_id' in doc) {
-            projectedDoc._id = doc._id;
-        }
-    } else { // Exclusion mode
-        Object.assign(projectedDoc, doc);
-        for (const key in this.projectionFields) {
-            if (this.projectionFields[key as keyof T] === 0) {
-                if (key.includes('.')) {
-                    // Handle nested paths for exclusion (basic implementation)
-                    const path = key.split('.');
-                    let current: any = projectedDoc;
-                    
-                    // Navigate to the parent of the property to exclude
-                    for (let i = 0; i < path.length - 1; i++) {
-                        const segment = path[i];
-                        if (current[segment] === undefined) break;
-                        current = current[segment];
-                    }
-                    
-                    // Delete the final property if we reached its parent
-                    const lastSegment = path[path.length - 1];
-                    if (current && current[lastSegment] !== undefined) {
-                        delete current[lastSegment];
-                    }
-                } else {
-                    delete projectedDoc[key as keyof T];
-                }
+
+            // Set the final property if we reached it
+            const lastSegment = path[path.length - 1];
+            if (current && current[lastSegment] !== undefined) {
+              target[lastSegment] = current[lastSegment];
             }
+          } else if (key in doc) {
+            projectedDoc[key as keyof T] = doc[key as keyof T];
+          }
         }
+      }
+      // _id is included by default in inclusion mode, unless explicitly excluded
+      if (this.projectionFields._id !== 0 && '_id' in doc) {
+        projectedDoc._id = doc._id;
+      }
+    } else {
+      // Exclusion mode
+      Object.assign(projectedDoc, doc);
+      for (const key in this.projectionFields) {
+        if (this.projectionFields[key as keyof T] === 0) {
+          if (key.includes('.')) {
+            // Handle nested paths for exclusion (basic implementation)
+            const path = key.split('.');
+            let current: any = projectedDoc;
+
+            // Navigate to the parent of the property to exclude
+            for (let i = 0; i < path.length - 1; i++) {
+              const segment = path[i];
+              if (current[segment] === undefined) break;
+              current = current[segment];
+            }
+
+            // Delete the final property if we reached its parent
+            const lastSegment = path[path.length - 1];
+            if (current && current[lastSegment] !== undefined) {
+              delete current[lastSegment];
+            }
+          } else {
+            delete projectedDoc[key as keyof T];
+          }
+        }
+      }
     }
     return projectedDoc;
   }
@@ -301,13 +321,12 @@ export class FindCursor<T extends DocumentWithId> {
     const finalParams = [...this.queryParts.params];
 
     if (this.sortCriteria) {
-      const sortClauses = Object.entries(this.sortCriteria)
-        .map(([field, order]) => {
-          if (field === '_id') {
-            return `_id ${order === 1 ? 'ASC' : 'DESC'}`;
-          }
-          return `json_extract(data, ${this.parseJsonPath(field)}) ${order === 1 ? 'ASC' : 'DESC'}`;
-        });
+      const sortClauses = Object.entries(this.sortCriteria).map(([field, order]) => {
+        if (field === '_id') {
+          return `_id ${order === 1 ? 'ASC' : 'DESC'}`;
+        }
+        return `json_extract(data, ${this.parseJsonPath(field)}) ${order === 1 ? 'ASC' : 'DESC'}`;
+      });
       if (sortClauses.length > 0) {
         finalSql += ` ORDER BY ${sortClauses.join(', ')}`;
       }
@@ -329,9 +348,9 @@ export class FindCursor<T extends DocumentWithId> {
     }
 
     const rows = await this.db.all<SQLiteRow>(finalSql, finalParams);
-    return rows.map(row => {
-        const doc = { _id: row._id, ...JSON.parse(row.data) } as T;
-        return this.applyProjection(doc);
+    return rows.map((row) => {
+      const doc = { _id: row._id, ...JSON.parse(row.data) } as T;
+      return this.applyProjection(doc);
     });
   }
 }
@@ -341,13 +360,16 @@ export class FindCursor<T extends DocumentWithId> {
  * as if it were a MongoDB collection.
  */
 export class MongoLiteCollection<T extends DocumentWithId> {
-  constructor(private db: SQLiteDB, public readonly name: string) {
-    this.ensureTable().catch(err => {
-        // This error should be handled or logged appropriately.
-        // For now, console.error is used. In a real app, a more robust
-        // error handling mechanism would be needed, potentially failing
-        // the collection initialization or notifying the user.
-        console.error(`Failed to ensure table ${this.name} exists:`, err);
+  constructor(
+    private db: SQLiteDB,
+    public readonly name: string
+  ) {
+    this.ensureTable().catch((err) => {
+      // This error should be handled or logged appropriately.
+      // For now, console.error is used. In a real app, a more robust
+      // error handling mechanism would be needed, potentially failing
+      // the collection initialization or notifying the user.
+      console.error(`Failed to ensure table ${this.name} exists:`, err);
     });
   }
 
@@ -415,7 +437,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     await this.ensureTable();
     const cursor = this.find(filter).limit(1);
     if (projection) {
-        cursor.project(projection);
+      cursor.project(projection);
     }
     const results = await cursor.toArray();
     return results.length > 0 ? results[0] : null;
@@ -439,10 +461,13 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async updateOne(filter: Filter<T>, update: UpdateFilter<T>): Promise<UpdateResult> {
     await this.ensureTable();
-    
+
     // Find the document first (only one)
     const paramsForSelect: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](filter, paramsForSelect);
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+      filter,
+      paramsForSelect
+    );
     const selectSql = `SELECT _id, data FROM "${this.name}" WHERE ${whereClause} LIMIT 1`;
 
     const rowToUpdate = await this.db.get<SQLiteRow>(selectSql, paramsForSelect);
@@ -467,14 +492,14 @@ export class MongoLiteCollection<T extends DocumentWithId> {
             modified = true;
           }
           break;
-          
+
         case '$unset':
           for (const path in opArgs) {
             this.unsetNestedValue(currentDoc, path);
             modified = true;
           }
           break;
-          
+
         case '$inc':
           for (const path in opArgs) {
             const value = opArgs[path];
@@ -487,12 +512,12 @@ export class MongoLiteCollection<T extends DocumentWithId> {
             }
           }
           break;
-          
+
         case '$push':
           for (const path in opArgs) {
             const value = opArgs[path];
             const currentValue = this.getNestedValue(currentDoc, path);
-            
+
             if (Array.isArray(currentValue)) {
               if (typeof value === 'object' && value !== null && '$each' in value) {
                 if (Array.isArray(value.$each)) {
@@ -517,22 +542,22 @@ export class MongoLiteCollection<T extends DocumentWithId> {
             }
           }
           break;
-          
+
         case '$pull':
           for (const path in opArgs) {
             const value = opArgs[path];
             const currentValue = this.getNestedValue(currentDoc, path);
-            
+
             if (Array.isArray(currentValue)) {
               // Simple equality pull
-              const newArray = currentValue.filter(item => {
+              const newArray = currentValue.filter((item) => {
                 if (typeof item === 'object' && typeof value === 'object') {
                   // For objects, do a deep comparison (simplified)
                   return JSON.stringify(item) !== JSON.stringify(value);
                 }
                 return item !== value;
               });
-              
+
               if (newArray.length !== currentValue.length) {
                 this.setNestedValue(currentDoc, path, newArray);
                 modified = true;
@@ -544,19 +569,24 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     }
 
     if (modified) {
+      // Get the modifiedCount
+      const matchedRecordSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
+      const matchedRecord = await this.db.get<{ count: number }>(matchedRecordSql, paramsForSelect);
+      const matchedCount = matchedRecord?.count || 0;
+
       // Update the document in SQLite
       const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
       const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
-      
-      const result = await this.db.run(updateSql, updateParams);
+
+      await this.db.run(updateSql, updateParams);
       return {
         acknowledged: true,
         matchedCount: 1,
-        modifiedCount: result.changes || 0,
+        modifiedCount: matchedCount,
         upsertedId: null, // We don't support upsert yet
       };
     }
-    
+
     return {
       acknowledged: true,
       matchedCount: 1,
@@ -570,11 +600,11 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   private setNestedValue(obj: any, path: string, value: any): void {
     const keys = path.split('.');
     let current = obj;
-    
+
     // Navigate to the last parent in the path
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
-      
+
       // Create nested objects if they don't exist
       if (current[key] === undefined || current[key] === null) {
         current[key] = {};
@@ -582,10 +612,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         // If it's not an object but we need to go deeper, replace it with an object
         current[key] = {};
       }
-      
+
       current = current[key];
     }
-    
+
     // Set the value at the final key
     current[keys[keys.length - 1]] = value;
   }
@@ -595,7 +625,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   private unsetNestedValue(obj: any, path: string): void {
     const keys = path.split('.');
     let current = obj;
-    
+
     // Navigate to the last parent in the path
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
@@ -604,7 +634,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       }
       current = current[key];
     }
-    
+
     // Delete the property at the final key
     delete current[keys[keys.length - 1]];
   }
@@ -614,7 +644,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   private getNestedValue(obj: any, path: string): any {
     const keys = path.split('.');
     let current = obj;
-    
+
     // Navigate through the path
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -623,7 +653,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       }
       current = current[key];
     }
-    
+
     return current;
   }
 
@@ -634,13 +664,24 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async deleteOne(filter: Filter<T>): Promise<DeleteResult> {
     await this.ensureTable();
-    
+
     const paramsForDelete: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](filter, paramsForDelete);
-    const deleteSql = `DELETE FROM "${this.name}" WHERE ${whereClause} LIMIT 1`;
-    
-    const result = await this.db.run(deleteSql, paramsForDelete);
-    return { acknowledged: true, deletedCount: result.changes || 0 };
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+      filter,
+      paramsForDelete
+    );
+
+    // Get the number of documents that would be deleted
+    const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
+    const countResult = await this.db.get<{ count: number }>(countSql, paramsForDelete);
+
+    const deleteSql = `
+      DELETE FROM "${this.name}"
+      WHERE ROWID IN (SELECT ROWID FROM "${this.name}" WHERE ${whereClause} LIMIT 1);
+    `;
+
+    await this.db.run(deleteSql, paramsForDelete);
+    return { acknowledged: true, deletedCount: countResult ? 1 : 0 };
   }
 
   /**
@@ -650,11 +691,14 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async deleteMany(filter: Filter<T>): Promise<DeleteResult> {
     await this.ensureTable();
-    
+
     const paramsForDelete: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](filter, paramsForDelete);
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+      filter,
+      paramsForDelete
+    );
     const deleteSql = `DELETE FROM "${this.name}" WHERE ${whereClause}`;
-    
+
     const result = await this.db.run(deleteSql, paramsForDelete);
     return { acknowledged: true, deletedCount: result.changes || 0 };
   }
@@ -666,11 +710,14 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async countDocuments(filter: Filter<T> = {}): Promise<number> {
     await this.ensureTable();
-    
+
     const paramsForCount: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](filter, paramsForCount);
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+      filter,
+      paramsForCount
+    );
     const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
-    
+
     const result = await this.db.get<{ count: number }>(countSql, paramsForCount);
     return result?.count || 0;
   }
