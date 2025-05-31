@@ -428,6 +428,39 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   }
 
   /**
+   * Inserts multiple documents into the collection.
+   * If any document does not have an `_id`, a UUID will be generated.
+   * @param docs An array of documents to insert.
+   * @returns {Promise<InsertOneResult[]>} An array of results for each insert operation.
+   * */
+  async insertMany(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
+    await this.ensureTable(); // Ensure table exists before insert
+    const results: InsertOneResult[] = [];
+
+    for (const doc of docs) {
+      const docId = doc._id || uuidv4();
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _id, ...dataToStore } = { ...doc, _id: docId }; // Ensure _id is part of the internal structure
+
+      const jsonData = JSON.stringify(dataToStore);
+
+      const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
+      try {
+        await this.db.run(sql, [docId, jsonData]);
+        results.push({ acknowledged: true, insertedId: docId });
+      } catch (error) {
+        console.error(`Error inserting document into ${this.name}:`, error);
+        if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
+          throw new Error(`Duplicate _id: ${docId}`);
+        }
+        throw error; // Re-throw other errors
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Finds a single document matching the filter.
    * @param filter The query criteria.
    * @param projection Optional. Specifies the fields to return.
@@ -592,6 +625,130 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       matchedCount: 1,
       modifiedCount: 0, // No changes were made
       upsertedId: null,
+    };
+  }
+
+  /**
+   * Updates multiple documents matching the filter.
+   * @param filter The selection criteria for the update.
+   * @param update The modifications to apply.
+   * @returns {Promise<UpdateResult>} An object describing the outcome.
+   */
+  async updateMany(filter: Filter<T>, update: UpdateFilter<T>): Promise<UpdateResult> {
+    await this.ensureTable();
+    const paramsForSelect: unknown[] = [];
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+      filter,
+      paramsForSelect
+    );
+    const selectSql = `SELECT _id, data FROM "${this.name}" WHERE ${whereClause}`;
+    const rowsToUpdate = await this.db.all<SQLiteRow>(selectSql, paramsForSelect);
+    if (rowsToUpdate.length === 0) {
+      return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
+    }
+    let modifiedCount = 0;
+    const updatedIds: string[] = [];
+    for (const rowToUpdate of rowsToUpdate) {
+      let currentDoc = JSON.parse(rowToUpdate.data);
+      let modified = false;
+      // Process update operators
+      for (const operator in update) {
+        const opArgs = update[operator as keyof UpdateFilter<T>];
+        if (!opArgs) continue;
+        switch (operator) {
+          case '$set':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              this.setNestedValue(currentDoc, path, value);
+              modified = true;
+            }
+            break;
+          case '$unset':
+            for (const path in opArgs) {
+              this.unsetNestedValue(currentDoc, path);
+              modified = true;
+            }
+            break;
+          case '$inc':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              if (typeof value === 'number') {
+                const currentValue = this.getNestedValue(currentDoc, path) || 0;
+                if (typeof currentValue === 'number') {
+                  this.setNestedValue(currentDoc, path, currentValue + value);
+                  modified = true;
+                }
+              }
+            }
+            break;
+          case '$push':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              const currentValue = this.getNestedValue(currentDoc, path);
+              if (Array.isArray(currentValue)) {
+                if (typeof value === 'object' && value !== null && '$each' in value) {
+                  if (Array.isArray(value.$each)) {
+                    currentValue.push(...value.$each);
+                    modified = true;
+                  }
+                } else {
+                  currentValue.push(value);
+                  modified = true;
+                }
+              } else if (currentValue === undefined) {
+                // If the field doesn't exist, create it as an array
+                if (typeof value === 'object' && value !== null && '$each' in value) {
+                  if (Array.isArray(value.$each)) {
+                    this.setNestedValue(currentDoc, path, [...value.$each]);
+                    modified = true;
+                  }
+                } else {
+                  this.setNestedValue(currentDoc, path, [value]);
+                  modified = true;
+                }
+              }
+            }
+            break;
+          case '$pull':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              const currentValue = this.getNestedValue(currentDoc, path);
+              if (Array.isArray(currentValue)) {
+              // Simple equality pull
+                const newArray = currentValue.filter((item) => {
+                  if (typeof item === 'object' && typeof value === 'object') {
+                    // For objects, do a deep comparison (simplified)
+                    return JSON.stringify(item) !== JSON.stringify(value);
+                  }
+                  return item !== value;
+                });
+
+                if (newArray.length !== currentValue.length) {
+                  this.setNestedValue(currentDoc, path, newArray);
+                  modified = true;
+                }
+              }
+            }
+            break;
+          // Add other operators as needed
+          default:
+            throw new Error(`Unsupported update operator: ${operator}`);
+        }
+      }
+      if (modified) {
+        // Update the document in SQLite
+        const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
+        const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
+        await this.db.run(updateSql, updateParams);
+        modifiedCount++;
+        updatedIds.push(rowToUpdate._id);
+      }
+    }
+    return {
+      acknowledged: true,
+      matchedCount: rowsToUpdate.length,
+      modifiedCount: modifiedCount,
+      upsertedId: null, // We don't support upsert yet
     };
   }
 
