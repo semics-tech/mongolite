@@ -34,8 +34,15 @@ describe('MongoLite', () => {
 
   it('should get a collection', () => {
     const collection = client.collection('testCollection');
-    assert.ok(collection instanceof MongoLiteCollection, 'Should return a MongoLiteCollection instance');
-    assert.strictEqual(collection.name, 'testCollection', 'Collection name should be set correctly');
+    assert.ok(
+      collection instanceof MongoLiteCollection,
+      'Should return a MongoLiteCollection instance'
+    );
+    assert.strictEqual(
+      collection.name,
+      'testCollection',
+      'Collection name should be set correctly'
+    );
   });
 
   it('should get a collection with a specific type', () => {
@@ -45,17 +52,30 @@ describe('MongoLite', () => {
       value: number;
     }
     const collection = client.collection<TestDoc>('typedCollection');
-    assert.ok(collection instanceof MongoLiteCollection, 'Should return a MongoLiteCollection instance');
-    assert.strictEqual(collection.name, 'typedCollection', 'Collection name should be set correctly');
+    assert.ok(
+      collection instanceof MongoLiteCollection,
+      'Should return a MongoLiteCollection instance'
+    );
+    assert.strictEqual(
+      collection.name,
+      'typedCollection',
+      'Collection name should be set correctly'
+    );
     // Further tests for typed collection would go into collection.test.ts
   });
 
   it('should allow multiple collections', () => {
     const collection1 = client.collection('collection1');
     const collection2 = client.collection('collection2');
-    assert.ok(collection1 instanceof MongoLiteCollection, 'Collection1 should be a MongoLiteCollection instance');
+    assert.ok(
+      collection1 instanceof MongoLiteCollection,
+      'Collection1 should be a MongoLiteCollection instance'
+    );
     assert.strictEqual(collection1.name, 'collection1', 'Collection1 name should be set correctly');
-    assert.ok(collection2 instanceof MongoLiteCollection, 'Collection2 should be a MongoLiteCollection instance');
+    assert.ok(
+      collection2 instanceof MongoLiteCollection,
+      'Collection2 should be a MongoLiteCollection instance'
+    );
     assert.strictEqual(collection2.name, 'collection2', 'Collection2 name should be set correctly');
   });
 });
