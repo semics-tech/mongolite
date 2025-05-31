@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+!/.env.example
+
+# SQLite database files (if you create them outside :memory:)
+*.sqlite
+*.sqlite3
+*.db

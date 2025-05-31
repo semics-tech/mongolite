@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x] # Test against multiple Node.js versions
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm' # Cache npm dependencies
+
+    - name: Install dependencies
+      run: npm ci # Use ci for cleaner installs in CI environments
+
+    - name: Build TypeScript
+      run: npm run build
+
+    # - name: Lint code (Optional, but recommended)
+    #   run: npm run lint
+
+    - name: Run tests
+      run: npm test -- --coverage --ci --reporters=default --reporters=jest-junit # Add JUnit reporter for test results
+
+    # Optional: Upload coverage to Coveralls or Codecov
+    # - name: Upload coverage to Coveralls
+    #   uses: coverallsapp/github-action@master
+    #   with:
+    #     github-token: ${{ secrets.GITHUB_TOKEN }}
+    #     path-to-lcov: ./coverage/lcov.info # Adjust if your lcov file is elsewhere
+
+    # Optional: Publish to NPM on new tag (example)
+    # - name: Publish to NPM
+    #   if: startsWith(github.ref, 'refs/tags/v') # Only run on version tags (e.g., v1.0.0)
+    #   run: |
+    #     npm config set //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+    #     npm publish --access public
+    #   env:
+    #     NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # Store your NPM token as a secret in GitHub
