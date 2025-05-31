@@ -1,6 +1,6 @@
 {
   "name": "mongolite-ts",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A MongoDB-like client using SQLite as a persistent store, written in TypeScript.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
