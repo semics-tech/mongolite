@@ -1,8 +1,8 @@
 # MongoLite-TS
 
-[![CI](https://github.com/YOUR_USERNAME/mongolite-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/mongolite-ts/actions/workflows/ci.yml)
+[![CI](https://github.com/semics-tech/mongolite-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/semics-tech/mongolite-ts/actions/workflows/ci.yml)
 [![NPM version](https://img.shields.io/npm/v/mongolite-ts.svg)](https://www.npmjs.com/package/mongolite-ts)
-[![Coverage Status](https://coveralls.io/repos/github/YOUR_USERNAME/mongolite-ts/badge.svg?branch=main)](https://coveralls.io/github/YOUR_USERNAME/mongolite-ts?branch=main)
+[![Coverage Status](https://coveralls.io/repos/github/semics-tech/mongolite-ts/badge.svg?branch=main)](https://coveralls.io/github/semics-tech/mongolite-ts?branch=main)
 
 A MongoDB-like client that uses SQLite as its underlying persistent store. Written in TypeScript, this package provides a familiar API for developers accustomed to MongoDB, while leveraging the simplicity and file-based nature of SQLite. It supports basic CRUD operations and JSON querying capabilities.
 
