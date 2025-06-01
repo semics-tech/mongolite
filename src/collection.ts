@@ -455,6 +455,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
         throw new Error(`Duplicate _id: ${docId}`);
       }
+      // Handle SQLITE_BUSY
+      if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+        return this.retryWithBackoff(() => this.insertOne(doc), `insert for ${docId}`);
+      }
       throw error; // Re-throw other errors
     }
   }
@@ -484,6 +488,20 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         console.error(`Error inserting document into ${this.name}:`, error);
         if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
           throw new Error(`Duplicate _id: ${docId}`);
+        }
+        if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+          // If we get a SQLITE_BUSY during bulk insert, retry just this one document
+          try {
+            const result = await this.retryWithBackoff(async () => {
+              await this.db.run(sql, [docId, jsonData]);
+              return { acknowledged: true, insertedId: docId };
+            }, `insert for ${docId} during bulk operation`);
+            results.push(result);
+            continue; // Skip to next document
+          } catch (retryError) {
+            // If retry also fails, throw the original error
+            throw error;
+          }
         }
         throw error; // Re-throw other errors
       }
@@ -669,7 +687,19 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
       const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
 
-      await this.db.run(updateSql, updateParams);
+      try {
+        await this.db.run(updateSql, updateParams);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+          await this.retryWithBackoff(
+            async () => this.db.run(updateSql, updateParams),
+            `update for ${rowToUpdate._id}`
+          );
+        } else {
+          throw error;
+        }
+      }
+
       return {
         acknowledged: true,
         matchedCount: 1,
@@ -797,9 +827,21 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         // Update the document in SQLite
         const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
         const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
-        await this.db.run(updateSql, updateParams);
-        modifiedCount++;
-        updatedIds.push(rowToUpdate._id);
+        try {
+          await this.db.run(updateSql, updateParams);
+          modifiedCount++;
+          updatedIds.push(rowToUpdate._id);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+            await this.retryWithBackoff(async () => {
+              await this.db.run(updateSql, updateParams);
+              modifiedCount++;
+              updatedIds.push(rowToUpdate._id);
+            }, `update for ${rowToUpdate._id} in batch operation`);
+          } else {
+            throw error;
+          }
+        }
       }
     }
     return {
@@ -895,7 +937,19 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       WHERE ROWID IN (SELECT ROWID FROM "${this.name}" WHERE ${whereClause} LIMIT 1);
     `;
 
-    await this.db.run(deleteSql, paramsForDelete);
+    try {
+      await this.db.run(deleteSql, paramsForDelete);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+        await this.retryWithBackoff(
+          async () => this.db.run(deleteSql, paramsForDelete),
+          `delete for filter ${JSON.stringify(filter)}`
+        );
+      } else {
+        throw error;
+      }
+    }
+
     return { acknowledged: true, deletedCount: countResult?.count ? 1 : 0 };
   }
 
@@ -919,7 +973,19 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     const deleteSql = `DELETE FROM "${this.name}" WHERE ${whereClause}`;
 
-    await this.db.run(deleteSql, paramsForDelete);
+    try {
+      await this.db.run(deleteSql, paramsForDelete);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+        await this.retryWithBackoff(
+          async () => this.db.run(deleteSql, paramsForDelete),
+          `delete many for filter ${JSON.stringify(filter)}`
+        );
+      } else {
+        throw error;
+      }
+    }
+
     return { acknowledged: true, deletedCount: countResult ? countResult.count : 0 };
   }
 
@@ -940,5 +1006,60 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     const result = await this.db.get<{ count: number }>(countSql, paramsForCount);
     return result?.count || 0;
+  }
+
+  /**
+   * Retries an operation with exponential backoff when SQLITE_BUSY errors occur.
+   * @param operation The operation function to retry.
+   * @param operationDescription A description of the operation for logging purposes.
+   * @param maxRetries The maximum number of retry attempts (default: 5).
+   * @param initialDelayMs The initial delay before the first retry in milliseconds (default: 100).
+   * @param maxDelayMs The maximum delay between retries in milliseconds (default: 10000).
+   * @returns The result of the operation once successful.
+   * @private
+   */
+  private async retryWithBackoff<R>(
+    operation: () => Promise<R>,
+    operationDescription: string,
+    maxRetries = 5,
+    initialDelayMs = 100,
+    maxDelayMs = 10000
+  ): Promise<R> {
+    let retryCount = 0;
+    let delayMs = initialDelayMs;
+
+    while (true) {
+      try {
+        if (retryCount > 0) {
+          console.warn(
+            `Retry attempt ${retryCount}/${maxRetries} for ${operationDescription} after ${delayMs}ms delay...`
+          );
+        }
+        return await operation();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY' && retryCount < maxRetries) {
+          retryCount++;
+
+          // Wait using exponential backoff with jitter
+          await new Promise((resolve) => {
+            // Add some randomness (jitter) to prevent multiple clients from retrying simultaneously
+            const jitter = Math.random() * 0.3 + 0.85; // Random factor between 0.85 and 1.15
+            delayMs = Math.min(delayMs * 2 * jitter, maxDelayMs);
+            setTimeout(resolve, delayMs);
+          });
+
+          // Continue to next iteration to retry
+          continue;
+        }
+
+        // If we've exhausted retries or it's a different error, rethrow
+        if (retryCount >= maxRetries && (error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+          console.error(
+            `Maximum retries (${maxRetries}) reached for ${operationDescription}. Operation failed.`
+          );
+        }
+        throw error;
+      }
+    }
   }
 }
