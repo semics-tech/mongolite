@@ -1,0 +1,42 @@
+name: Dependabot Security Updates
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run security audit weekly
+    - cron: '0 0 * * 0'
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit
+
+      # Run npm audit fix if you want to automatically fix vulnerabilities
+      # This is optional and might cause breaking changes, so use with caution
+      - name: Fix vulnerabilities (if possible)
+        run: npm audit fix
+        continue-on-error: true
+
+      # Create issues for any vulnerabilities that can't be fixed automatically
+      - name: Create issues for vulnerabilities
+        if: failure()
+        uses: JasonEtco/create-an-issue@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          filename: .github/ISSUE_TEMPLATE/security-vulnerability.md
+          update_existing: true
