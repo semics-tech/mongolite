@@ -242,17 +242,26 @@ export class FindCursor<T extends DocumentWithId> {
     // Determine if it's an inclusion or exclusion projection
     for (const key in this.projectionFields) {
       if (key === '_id') continue;
-      if (this.projectionFields[key as keyof T] === 1) {
+      if (
+        this.projectionFields[key as keyof T] === 1 ||
+        this.projectionFields[key as keyof T] === true
+      ) {
         hasExplicitInclusion = true;
         break;
       }
-      if (this.projectionFields[key as keyof T] === 0) {
+      if (
+        this.projectionFields[key as keyof T] === 0 ||
+        this.projectionFields[key as keyof T] === false
+      ) {
         includeMode = false;
         // No break here, need to check all for explicit inclusions if _id is also 0
       }
     }
 
-    if (this.projectionFields._id === 0 && !hasExplicitInclusion) {
+    if (
+      (this.projectionFields._id === 0 || this.projectionFields._id === false) && 
+      !hasExplicitInclusion
+    ) {
       // If _id is excluded and no other fields are explicitly included,
       // it's an exclusion projection where other fields are implicitly included.
       includeMode = false;
@@ -263,7 +272,10 @@ export class FindCursor<T extends DocumentWithId> {
     if (includeMode) {
       // Inclusion mode
       for (const key in this.projectionFields) {
-        if (this.projectionFields[key as keyof T] === 1) {
+        if (
+          this.projectionFields[key as keyof T] === 1 ||
+          this.projectionFields[key as keyof T] === true
+        ) {
           if (key.includes('.')) {
             // Handle nested paths for inclusion (basic implementation)
             const path = key.split('.');
@@ -294,14 +306,17 @@ export class FindCursor<T extends DocumentWithId> {
         }
       }
       // _id is included by default in inclusion mode, unless explicitly excluded
-      if (this.projectionFields._id !== 0 && '_id' in doc) {
+      if (this.projectionFields._id !== 0 && this.projectionFields._id !== false && '_id' in doc) {
         projectedDoc._id = doc._id;
       }
     } else {
       // Exclusion mode
       Object.assign(projectedDoc, doc);
       for (const key in this.projectionFields) {
-        if (this.projectionFields[key as keyof T] === 0) {
+        if (
+          this.projectionFields[key as keyof T] === 0 ||
+          this.projectionFields[key as keyof T] === false
+        ) {
           if (key.includes('.')) {
             // Handle nested paths for exclusion (basic implementation)
             const path = key.split('.');

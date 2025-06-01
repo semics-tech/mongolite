@@ -118,7 +118,7 @@ export type SortCriteria<T> = {
  * Projection type for selecting fields.
  */
 export type Projection<T> = {
-  [P in keyof T]?: 0 | 1;
+  [P in keyof T]?: 0 | 1 | boolean;
 } & {
-  [key: string]: 0 | 1; // For dot notation and nested fields
+  [key: string]: 0 | 1 | boolean; // For dot notation and nested fields
 };
