@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { ObjectId } from 'bson';
 import { SQLiteDB } from './db.js';
 import {
   DocumentWithId,
@@ -438,7 +438,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async insertOne(doc: Omit<T, '_id'> & { _id?: string }): Promise<InsertOneResult> {
     await this.ensureTable(); // Ensure table exists before insert
-    const docId = doc._id || uuidv4();
+    const docId = doc._id || new ObjectId().toString();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { _id, ...dataToStore } = { ...doc, _id: docId }; // Ensure _id is part of the internal structure
 
@@ -474,7 +474,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     const results: InsertOneResult[] = [];
 
     for (const doc of docs) {
-      const docId = doc._id || uuidv4();
+      const docId = doc._id || new ObjectId().toString();
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { _id, ...dataToStore } = { ...doc, _id: docId }; // Ensure _id is part of the internal structure
 
@@ -565,7 +565,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     }
     // If no document found and upsert is requested, create a new document
     if (!rowToUpdate && options.upsert) {
-      const newDocId = uuidv4();
+      const newDocId = new ObjectId().toString();
       const newDoc = { _id: newDocId, ...update.$set } as T; // Assuming $set is used for upsert
       // Ensure _id is set
       const jsonData = JSON.stringify(newDoc);
