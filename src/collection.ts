@@ -275,21 +275,24 @@ export class FindCursor<T extends DocumentWithId> {
                   break;
                 case '$not':
                   // Handle negation of conditions
-                  const notCondition = this.buildWhereClause({ [key]: opValue }, params);
+                  const notCondition = this.buildWhereClause(
+                    { [key]: opValue } as Filter<T>,
+                    params
+                  );
                   conditions.push(`NOT (${notCondition})`);
                   break;
                 case '$all':
                   if (Array.isArray(opValue) && opValue.length > 0) {
                     // Check if the field is an array
                     const arrayTypeCheck = `json_type(json_extract(data, ${jsonPath})) = 'array'`;
-                    
+
                     // For each value in the $all array, create a subquery to check if it exists in the array
                     const allConditions = opValue
                       .map(() => {
                         return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${jsonPath})) WHERE json_each.value = ?)`;
                       })
                       .join(' AND ');
-                    
+
                     conditions.push(`(${arrayTypeCheck} AND ${allConditions})`);
                     opValue.forEach((val) => params.push(val));
                   } else {
@@ -315,23 +318,33 @@ export class FindCursor<T extends DocumentWithId> {
                                 const opValue = sfValue[op as keyof QueryOperators<any>];
                                 switch (op) {
                                   case '$eq':
-                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') = ?`);
+                                    subOpConditions.push(
+                                      `json_extract(elements.value, '$.${sfKey}') = ?`
+                                    );
                                     params.push(opValue);
                                     break;
                                   case '$gt':
-                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') > ?`);
+                                    subOpConditions.push(
+                                      `json_extract(elements.value, '$.${sfKey}') > ?`
+                                    );
                                     params.push(opValue);
                                     break;
                                   case '$gte':
-                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') >= ?`);
+                                    subOpConditions.push(
+                                      `json_extract(elements.value, '$.${sfKey}') >= ?`
+                                    );
                                     params.push(opValue);
                                     break;
                                   case '$lt':
-                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') < ?`);
+                                    subOpConditions.push(
+                                      `json_extract(elements.value, '$.${sfKey}') < ?`
+                                    );
                                     params.push(opValue);
                                     break;
                                   case '$lte':
-                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') <= ?`);
+                                    subOpConditions.push(
+                                      `json_extract(elements.value, '$.${sfKey}') <= ?`
+                                    );
                                     params.push(opValue);
                                     break;
                                   // Add other operators as needed
