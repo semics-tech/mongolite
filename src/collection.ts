@@ -66,6 +66,103 @@ export class FindCursor<T extends DocumentWithId> {
           .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
           .join(' OR ');
         conditions.push(`NOT (${norConditions})`);
+      } else if (key === '$text' && filter.$text) {
+        // Handle text search (basic implementation)
+        const search = filter.$text.$search;
+        if (typeof search === 'string' && search.trim() !== '') {
+          conditions.push(`data LIKE ?`);
+          params.push(`%${search}%`); // Simple LIKE search
+        } else {
+          conditions.push('1=0'); // No valid search term, nothing matches
+        }
+      } else if (key === '$exists' && filter.$exists) {
+        // Handle existence check
+        const existsConditions = Object.entries(filter.$exists)
+          .map(([field, exists]) => {
+            const jsonPath = this.parseJsonPath(field);
+            if (exists) {
+              return `json_extract(data, ${jsonPath}) IS NOT NULL`;
+            } else {
+              return `json_extract(data, ${jsonPath}) IS NULL`;
+            }
+          })
+          .join(' AND ');
+        conditions.push(`(${existsConditions})`);
+      } else if (key === '$not' && filter.$not) {
+        // Handle negation of conditions
+        const notConditions = filter.$not;
+        const notClause = this.buildWhereClause(notConditions, params);
+        conditions.push(`NOT (${notClause})`);
+      } else if (key === '$elemMatch' && filter.$elemMatch) {
+        // Handle array element match
+        const elemMatchConditions = Object.entries(filter.$elemMatch)
+          .map(([field, subFilter]) => {
+            const arrayPath = this.parseJsonPath(field);
+
+            // First check if the field exists and is an array
+            const checkArrayCondition = `json_type(json_extract(data, ${arrayPath})) = 'array'`;
+
+            // Use a subquery with json_each to find at least one array element matching all conditions
+            let elemMatchSubquery = `EXISTS (
+              SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) as elements
+              WHERE `;
+
+            // Process the conditions for the array elements
+            if (typeof subFilter === 'object' && subFilter !== null) {
+              const elemConditions = Object.entries(subFilter)
+                .map(([subField, subValue]) => {
+                  if (typeof subValue === 'object' && subValue !== null) {
+                    // Handle operators in the subfilter
+                    const subConditions = [];
+                    for (const op in subValue) {
+                      const opValue = subValue[op];
+                      switch (op) {
+                        case '$eq':
+                          subConditions.push(`json_extract(elements.value, '$.${subField}') = ?`);
+                          params.push(opValue);
+                          break;
+                        case '$gt':
+                          subConditions.push(`json_extract(elements.value, '$.${subField}') > ?`);
+                          params.push(opValue);
+                          break;
+                        case '$gte':
+                          subConditions.push(`json_extract(elements.value, '$.${subField}') >= ?`);
+                          params.push(opValue);
+                          break;
+                        case '$lt':
+                          subConditions.push(`json_extract(elements.value, '$.${subField}') < ?`);
+                          params.push(opValue);
+                          break;
+                        case '$lte':
+                          subConditions.push(`json_extract(elements.value, '$.${subField}') <= ?`);
+                          params.push(opValue);
+                          break;
+                        // Add other operators as needed
+                      }
+                    }
+                    return subConditions.join(' AND ');
+                  } else {
+                    // Simple equality for direct value
+                    params.push(subValue);
+                    return `json_extract(elements.value, '$.${subField}') = ?`;
+                  }
+                })
+                .join(' AND ');
+
+              elemMatchSubquery += elemConditions;
+            } else {
+              // Simple equality check for the entire element
+              params.push(subFilter);
+              elemMatchSubquery += `elements.value = ?`;
+            }
+
+            elemMatchSubquery += ')';
+
+            return `${checkArrayCondition} AND ${elemMatchSubquery}`;
+          })
+          .join(' AND ');
+
+        conditions.push(`(${elemMatchConditions})`);
       } else {
         // Handle field conditions
         if (key.startsWith('$')) continue; // Skip logical operators already handled
@@ -259,7 +356,7 @@ export class FindCursor<T extends DocumentWithId> {
     }
 
     if (
-      (this.projectionFields._id === 0 || this.projectionFields._id === false) && 
+      (this.projectionFields._id === 0 || this.projectionFields._id === false) &&
       !hasExplicitInclusion
     ) {
       // If _id is excluded and no other fields are explicitly included,
