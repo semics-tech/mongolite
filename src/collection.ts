@@ -93,6 +93,23 @@ export class FindCursor<T extends DocumentWithId> {
         const notConditions = filter.$not;
         const notClause = this.buildWhereClause(notConditions, params);
         conditions.push(`NOT (${notClause})`);
+      } else if (key === '$all' && filter.$all) {
+        // Handle array all match
+        const allConditions = Object.entries(filter.$all)
+          .map(([field, values]) => {
+            const arrayPath = this.parseJsonPath(field);
+            if (Array.isArray(values) && values.length > 0) {
+              const inConditions = values
+                .map(() => `json_extract(data, ${arrayPath}) = ?`)
+                .join(' AND ');
+              params.push(...values);
+              return `(${inConditions})`;
+            } else {
+              return '1=0'; // Empty $all means nothing matches
+            }
+          })
+          .join(' AND ');
+        conditions.push(`(${allConditions})`);
       } else if (key === '$elemMatch' && filter.$elemMatch) {
         // Handle array element match
         const elemMatchConditions = Object.entries(filter.$elemMatch)
@@ -255,6 +272,93 @@ export class FindCursor<T extends DocumentWithId> {
                   } else {
                     conditions.push(`json_extract(data, ${jsonPath}) IS NULL`);
                   }
+                  break;
+                case '$not':
+                  // Handle negation of conditions
+                  const notCondition = this.buildWhereClause({ [key]: opValue }, params);
+                  conditions.push(`NOT (${notCondition})`);
+                  break;
+                case '$all':
+                  if (Array.isArray(opValue) && opValue.length > 0) {
+                    // Check if the field is an array
+                    const arrayTypeCheck = `json_type(json_extract(data, ${jsonPath})) = 'array'`;
+                    
+                    // For each value in the $all array, create a subquery to check if it exists in the array
+                    const allConditions = opValue
+                      .map(() => {
+                        return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${jsonPath})) WHERE json_each.value = ?)`;
+                      })
+                      .join(' AND ');
+                    
+                    conditions.push(`(${arrayTypeCheck} AND ${allConditions})`);
+                    opValue.forEach((val) => params.push(val));
+                  } else {
+                    conditions.push('1=0'); // Empty $all array, nothing will match
+                  }
+                  break;
+                case '$elemMatch':
+                  // Handle array element match
+                  const elemMatchConditions = Object.entries(opValue)
+                    .map(([subField, subFilter]) => {
+                      const subJsonPath = this.parseJsonPath(`${key}.${subField}`);
+                      let elemMatchSubquery = `EXISTS (
+                        SELECT 1 FROM json_each(json_extract(data, ${subJsonPath})) as elements
+                        WHERE `;
+
+                      if (typeof subFilter === 'object' && subFilter !== null) {
+                        const subConditions = Object.entries(subFilter)
+                          .map(([sfKey, sfValue]) => {
+                            if (typeof sfValue === 'object' && sfValue !== null) {
+                              // Handle operators in the subfilter
+                              const subOpConditions: string[] = [];
+                              for (const op in sfValue) {
+                                const opValue = sfValue[op as keyof QueryOperators<any>];
+                                switch (op) {
+                                  case '$eq':
+                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') = ?`);
+                                    params.push(opValue);
+                                    break;
+                                  case '$gt':
+                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') > ?`);
+                                    params.push(opValue);
+                                    break;
+                                  case '$gte':
+                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') >= ?`);
+                                    params.push(opValue);
+                                    break;
+                                  case '$lt':
+                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') < ?`);
+                                    params.push(opValue);
+                                    break;
+                                  case '$lte':
+                                    subOpConditions.push(`json_extract(elements.value, '$.${sfKey}') <= ?`);
+                                    params.push(opValue);
+                                    break;
+                                  // Add other operators as needed
+                                }
+                              }
+                              return subOpConditions.join(' AND ');
+                            } else {
+                              // Simple equality for direct value
+                              params.push(sfValue);
+                              return `json_extract(elements.value, '$.${sfKey}') = ?`;
+                            }
+                          })
+                          .join(' AND ');
+
+                        elemMatchSubquery += subConditions;
+                      } else {
+                        // Simple equality check for the entire element
+                        params.push(subFilter);
+                        elemMatchSubquery += `elements.value = ?`;
+                      }
+
+                      elemMatchSubquery += ')';
+                      return elemMatchSubquery;
+                    })
+                    .join(' AND ');
+
+                  conditions.push(`(${elemMatchConditions})`);
                   break;
                 // Add other operators as needed
               }
