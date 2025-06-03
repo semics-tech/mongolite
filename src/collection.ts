@@ -301,77 +301,75 @@ export class FindCursor<T extends DocumentWithId> {
                   break;
                 case '$elemMatch':
                   // Handle array element match
-                  const elemMatchConditions = Object.entries(opValue)
-                    .map(([subField, subFilter]) => {
-                      const subJsonPath = this.parseJsonPath(`${key}.${subField}`);
-                      let elemMatchSubquery = `EXISTS (
-                        SELECT 1 FROM json_each(json_extract(data, ${subJsonPath})) as elements
-                        WHERE `;
+                  // For nested.items we need to check for conditions on the same array element
+                  // Build a query that checks if there's at least one array element that satisfies all conditions
+                  const arrayPath = this.parseJsonPath(key);
+                  let elemMatchSubquery = `EXISTS (
+                    SELECT 1 
+                    FROM json_each(json_extract(data, ${arrayPath})) as array_elements 
+                    WHERE `;
 
-                      if (typeof subFilter === 'object' && subFilter !== null) {
-                        const subConditions = Object.entries(subFilter)
-                          .map(([sfKey, sfValue]) => {
-                            if (typeof sfValue === 'object' && sfValue !== null) {
-                              // Handle operators in the subfilter
-                              const subOpConditions: string[] = [];
-                              for (const op in sfValue) {
-                                const opValue = sfValue[op as keyof QueryOperators<any>];
-                                switch (op) {
-                                  case '$eq':
-                                    subOpConditions.push(
-                                      `json_extract(elements.value, '$.${sfKey}') = ?`
-                                    );
-                                    params.push(opValue);
-                                    break;
-                                  case '$gt':
-                                    subOpConditions.push(
-                                      `json_extract(elements.value, '$.${sfKey}') > ?`
-                                    );
-                                    params.push(opValue);
-                                    break;
-                                  case '$gte':
-                                    subOpConditions.push(
-                                      `json_extract(elements.value, '$.${sfKey}') >= ?`
-                                    );
-                                    params.push(opValue);
-                                    break;
-                                  case '$lt':
-                                    subOpConditions.push(
-                                      `json_extract(elements.value, '$.${sfKey}') < ?`
-                                    );
-                                    params.push(opValue);
-                                    break;
-                                  case '$lte':
-                                    subOpConditions.push(
-                                      `json_extract(elements.value, '$.${sfKey}') <= ?`
-                                    );
-                                    params.push(opValue);
-                                    break;
-                                  // Add other operators as needed
-                                }
-                              }
-                              return subOpConditions.join(' AND ');
-                            } else {
-                              // Simple equality for direct value
-                              params.push(sfValue);
-                              return `json_extract(elements.value, '$.${sfKey}') = ?`;
+                  // Process each condition in the $elemMatch
+                  if (typeof opValue === 'object' && opValue !== null) {
+                    const subConditions = Object.entries(opValue)
+                      .map(([sfKey, sfValue]) => {
+                        if (typeof sfValue === 'object' && sfValue !== null) {
+                          // Handle operators in the subfilter
+                          const subOpConditions: string[] = [];
+                          for (const op in sfValue) {
+                            const opVal = sfValue[op as keyof QueryOperators<any>];
+                            switch (op) {
+                              case '$eq':
+                                subOpConditions.push(
+                                  `json_extract(array_elements.value, '$.${sfKey}') = ?`
+                                );
+                                params.push(opVal);
+                                break;
+                              case '$gt':
+                                subOpConditions.push(
+                                  `json_extract(array_elements.value, '$.${sfKey}') > ?`
+                                );
+                                params.push(opVal);
+                                break;
+                              case '$gte':
+                                subOpConditions.push(
+                                  `json_extract(array_elements.value, '$.${sfKey}') >= ?`
+                                );
+                                params.push(opVal);
+                                break;
+                              case '$lt':
+                                subOpConditions.push(
+                                  `json_extract(array_elements.value, '$.${sfKey}') < ?`
+                                );
+                                params.push(opVal);
+                                break;
+                              case '$lte':
+                                subOpConditions.push(
+                                  `json_extract(array_elements.value, '$.${sfKey}') <= ?`
+                                );
+                                params.push(opVal);
+                                break;
+                              // Add other operators as needed
                             }
-                          })
-                          .join(' AND ');
+                          }
+                          return subOpConditions.join(' AND ');
+                        } else {
+                          // Simple equality for direct value
+                          params.push(sfValue);
+                          return `json_extract(array_elements.value, '$.${sfKey}') = ?`;
+                        }
+                      })
+                      .join(' AND ');
 
-                        elemMatchSubquery += subConditions;
-                      } else {
-                        // Simple equality check for the entire element
-                        params.push(subFilter);
-                        elemMatchSubquery += `elements.value = ?`;
-                      }
+                    elemMatchSubquery += subConditions;
+                  } else {
+                    // Simple equality check for the entire element
+                    params.push(opValue);
+                    elemMatchSubquery += `array_elements.value = ?`;
+                  }
 
-                      elemMatchSubquery += ')';
-                      return elemMatchSubquery;
-                    })
-                    .join(' AND ');
-
-                  conditions.push(`(${elemMatchConditions})`);
+                  elemMatchSubquery += ')';
+                  conditions.push(elemMatchSubquery);
                   break;
                 // Add other operators as needed
               }

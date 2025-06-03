@@ -239,6 +239,20 @@ describe('MongoLiteCollection - Query Operators Tests', () => {
       assert.ok(docs.some((d) => d._id === '5')); // Has item with category cat1
     });
 
+    it('should find documents with nested array elements', async () => {
+      const docs = await collection
+        .find({
+          'nested.items': {
+            $elemMatch: { id: 4, name: 'item4' },
+          },
+          name: 'anotherDoc',
+        })
+        .toArray();
+
+      assert.strictEqual(docs.length, 1);
+      assert.ok(docs.some((d) => d._id === '5'));
+    });
+
     it('should find documents with complex element matching', async () => {
       const docs = await collection
         .find({
