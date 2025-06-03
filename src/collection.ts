@@ -113,7 +113,7 @@ export class FindCursor<T extends DocumentWithId> {
                 .map(([subField, subValue]) => {
                   if (typeof subValue === 'object' && subValue !== null) {
                     // Handle operators in the subfilter
-                    const subConditions = [];
+                    const subConditions: string[] = [];
                     for (const op in subValue) {
                       const opValue = subValue[op];
                       switch (op) {
