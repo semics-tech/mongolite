@@ -1,11 +1,4 @@
-import {
-  DocumentWithId,
-  Filter,
-  QueryOperators,
-  SortCriteria,
-  Projection,
-  SQLiteRow,
-} from '../types.js';
+import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../types.js';
 import { SQLiteDB } from '../db.js';
 
 /**
@@ -34,31 +27,204 @@ export class FindCursor<T extends DocumentWithId> {
     return `'$.${path.replace(/\./g, '.')}'`;
   }
 
-  private buildWhereClause(filter: Filter<T>, params: unknown[]): string {
+  /**
+   * Helper method to generate a comparison condition
+   */
+  private buildComparisonCondition(
+    field: string,
+    operator: string,
+    value: unknown,
+    params: unknown[],
+    elementPrefix: string = 'data'
+  ): string {
+    // Handle _id specially as it's a column, not in the JSON
+    if (field === '_id' && elementPrefix === 'data') {
+      switch (operator) {
+        case '$eq':
+          params.push(value);
+          return '_id = ?';
+        case '$ne':
+          params.push(value);
+          return '_id <> ?';
+        case '$in':
+          if (Array.isArray(value) && value.length > 0) {
+            params.push(...value);
+            return `_id IN (${value.map(() => '?').join(',')})`;
+          }
+          return '1=0'; // Empty array, nothing matches
+        case '$nin':
+          if (Array.isArray(value) && value.length > 0) {
+            params.push(...value);
+            return `_id NOT IN (${value.map(() => '?').join(',')})`;
+          }
+          return '1=1'; // Empty array, everything matches
+        default:
+          // Handle other operators that might be applied to _id
+          return '1=0'; // Unsupported operator for _id
+      }
+    }
+
+    // For JSON fields
+    const jsonPath =
+      elementPrefix === 'data'
+        ? `json_extract(${elementPrefix}, ${this.parseJsonPath(field)})`
+        : `json_extract(${elementPrefix}.value, '$.${field}')`;
+
+    switch (operator) {
+      case '$eq':
+        params.push(value);
+        return `${jsonPath} = ?`;
+      case '$ne':
+        if (value === null) {
+          return `${jsonPath} IS NOT NULL`;
+        }
+        params.push(value);
+        return `${jsonPath} != ?`;
+      case '$gt':
+        params.push(value);
+        return `${jsonPath} > ?`;
+      case '$gte':
+        params.push(value);
+        return `${jsonPath} >= ?`;
+      case '$lt':
+        params.push(value);
+        return `${jsonPath} < ?`;
+      case '$lte':
+        params.push(value);
+        return `${jsonPath} <= ?`;
+      case '$exists':
+        return value ? `${jsonPath} IS NOT NULL` : `${jsonPath} IS NULL`;
+      case '$in':
+        if (Array.isArray(value) && value.length > 0) {
+          const conditions = value.map(() => `${jsonPath} = ?`).join(' OR ');
+          params.push(...value);
+          return `(${conditions})`;
+        }
+        return '1=0'; // Empty array, nothing matches
+      case '$nin':
+        if (Array.isArray(value) && value.length > 0) {
+          const conditions = value.map(() => `${jsonPath} != ?`).join(' AND ');
+          params.push(...value);
+          return `(${conditions})`;
+        }
+        return '1=1'; // Empty array, everything matches
+      default:
+        return '1=0'; // Unsupported operator
+    }
+  }
+
+  /**
+   * Builds a subquery for array operations like $all and $elemMatch
+   */
+  private buildArraySubquery(
+    field: string,
+    operator: string,
+    value: unknown,
+    params: unknown[]
+  ): string {
+    const arrayPath = this.parseJsonPath(field);
+    const arrayTypeCheck = `json_type(json_extract(data, ${arrayPath})) = 'array'`;
+
+    if (operator === '$all') {
+      if (Array.isArray(value) && value.length > 0) {
+        const allConditions = value
+          .map((item) => {
+            params.push(item);
+            return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE json_each.value = ?)`;
+          })
+          .join(' AND ');
+        return `(${arrayTypeCheck} AND ${allConditions})`;
+      }
+      return '1=0'; // Empty $all array, nothing matches
+    } else if (operator === '$elemMatch') {
+      let elemMatchSubquery = `EXISTS (
+        SELECT 1 
+        FROM json_each(json_extract(data, ${arrayPath})) as array_elements 
+        WHERE `;
+
+      if (typeof value === 'object' && value !== null) {
+        const conditions = this.buildObjectConditions(value, params, 'array_elements');
+        elemMatchSubquery += conditions;
+      } else {
+        // Simple equality check for the entire element
+        params.push(value);
+        elemMatchSubquery += `array_elements.value = ?`;
+      }
+
+      elemMatchSubquery += ')';
+      return `${arrayTypeCheck} AND ${elemMatchSubquery}`;
+    }
+
+    return '1=0'; // Unsupported array operator
+  }
+
+  /**
+   * Builds conditions for an object with potentially nested operators
+   */
+  private buildObjectConditions(
+    obj: object,
+    params: unknown[],
+    elementPrefix: string = 'data'
+  ): string {
     const conditions: string[] = [];
 
-    // Handle $and, $or, $nor logical operators at the top level
+    for (const [key, value] of Object.entries(obj)) {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Check if this is an operator object
+        const operatorKeys = Object.keys(value);
+        const isOperatorObject = operatorKeys.every((k) => k.startsWith('$'));
+
+        if (isOperatorObject) {
+          // This is an object with operators like { age: { $gt: 30 } }
+          const opConditions = operatorKeys.map((op) =>
+            this.buildComparisonCondition(key, op, value[op], params, elementPrefix)
+          );
+          conditions.push(`(${opConditions.join(' AND ')})`);
+        } else {
+          // This is a nested object, handle recursively
+          // In this implementation, we'd need to handle dot notation
+          // which might require more complex logic
+          conditions.push('1=0'); // Placeholder for nested object handling
+        }
+      } else {
+        // Simple equality
+        conditions.push(this.buildComparisonCondition(key, '$eq', value, params, elementPrefix));
+      }
+    }
+
+    return conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+  }
+
+  private buildWhereClause(filter: Filter<T>, params: unknown[]): string {
+    const conditions: string[] = [];
+    console.log('Building where clause for filter:', JSON.stringify(filter));
+
     for (const key of Object.keys(filter)) {
+      const value = filter[key as keyof Filter<T>];
+      console.log(`Processing key: ${key}, value:`, JSON.stringify(value));
+
+      // Handle logical operators
       if (key === '$and' && filter.$and) {
-        const condition = filter.$and;
-        const andConditions = condition
+        const andConditions = filter.$and
           .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
           .join(' AND ');
         conditions.push(`(${andConditions})`);
       } else if (key === '$or' && filter.$or) {
-        const condition = filter.$or;
-        const orConditions = condition
+        const orConditions = filter.$or
           .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
           .join(' OR ');
         conditions.push(`(${orConditions})`);
       } else if (key === '$nor' && filter.$nor) {
-        const condition = filter.$nor;
-        const norConditions = condition
+        const norConditions = filter.$nor
           .map((subFilter) => `(${this.buildWhereClause(subFilter, params)})`)
           .join(' OR ');
         conditions.push(`NOT (${norConditions})`);
-      } else if (key === '$text' && filter.$text) {
-        // Handle text search (basic implementation)
+      } else if (key === '$not' && filter.$not) {
+        const notClause = this.buildWhereClause(filter.$not, params);
+        conditions.push(`NOT (${notClause})`);
+      }
+      // Handle text search
+      else if (key === '$text' && filter.$text) {
         const search = filter.$text.$search;
         if (typeof search === 'string' && search.trim() !== '') {
           conditions.push(`data LIKE ?`);
@@ -66,317 +232,65 @@ export class FindCursor<T extends DocumentWithId> {
         } else {
           conditions.push('1=0'); // No valid search term, nothing matches
         }
-      } else if (key === '$exists' && filter.$exists) {
-        // Handle existence check
+      }
+      // Handle field existence checks
+      else if (key === '$exists' && filter.$exists) {
         const existsConditions = Object.entries(filter.$exists)
-          .map(([field, exists]) => {
-            const jsonPath = this.parseJsonPath(field);
-            if (exists) {
-              return `json_extract(data, ${jsonPath}) IS NOT NULL`;
-            } else {
-              return `json_extract(data, ${jsonPath}) IS NULL`;
-            }
-          })
+          .map(([field, exists]) => this.buildComparisonCondition(field, '$exists', exists, params))
           .join(' AND ');
         conditions.push(`(${existsConditions})`);
-      } else if (key === '$not' && filter.$not) {
-        // Handle negation of conditions
-        const notConditions = filter.$not;
-        const notClause = this.buildWhereClause(notConditions, params);
-        conditions.push(`NOT (${notClause})`);
-      } else if (key === '$all' && filter.$all) {
-        // Handle array all match
-        const allConditions = Object.entries(filter.$all)
-          .map(([field, values]) => {
-            const arrayPath = this.parseJsonPath(field);
-            if (Array.isArray(values) && values.length > 0) {
-              const inConditions = values
-                .map(() => `json_extract(data, ${arrayPath}) = ?`)
-                .join(' AND ');
-              params.push(...values);
-              return `(${inConditions})`;
-            } else {
-              return '1=0'; // Empty $all means nothing matches
-            }
-          })
+      }
+      // Handle array operations
+      else if ((key === '$all' || key === '$elemMatch') && filter[key]) {
+        const arrayConditions = Object.entries(filter[key])
+          .map(([field, value]) => this.buildArraySubquery(field, key, value, params))
           .join(' AND ');
-        conditions.push(`(${allConditions})`);
-      } else if (key === '$elemMatch' && filter.$elemMatch) {
-        // Handle array element match
-        const elemMatchConditions = Object.entries(filter.$elemMatch)
-          .map(([field, subFilter]) => {
-            const arrayPath = this.parseJsonPath(field);
-
-            // First check if the field exists and is an array
-            const checkArrayCondition = `json_type(json_extract(data, ${arrayPath})) = 'array'`;
-
-            // Use a subquery with json_each to find at least one array element matching all conditions
-            let elemMatchSubquery = `EXISTS (
-              SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) as elements
-              WHERE `;
-
-            // Process the conditions for the array elements
-            if (typeof subFilter === 'object' && subFilter !== null) {
-              const elemConditions = Object.entries(subFilter)
-                .map(([subField, subValue]) => {
-                  if (typeof subValue === 'object' && subValue !== null) {
-                    // Handle operators in the subfilter
-                    const subConditions: string[] = [];
-                    for (const op in subValue) {
-                      const opValue = subValue[op];
-                      switch (op) {
-                        case '$eq':
-                          subConditions.push(`json_extract(elements.value, '$.${subField}') = ?`);
-                          params.push(opValue);
-                          break;
-                        case '$gt':
-                          subConditions.push(`json_extract(elements.value, '$.${subField}') > ?`);
-                          params.push(opValue);
-                          break;
-                        case '$gte':
-                          subConditions.push(`json_extract(elements.value, '$.${subField}') >= ?`);
-                          params.push(opValue);
-                          break;
-                        case '$lt':
-                          subConditions.push(`json_extract(elements.value, '$.${subField}') < ?`);
-                          params.push(opValue);
-                          break;
-                        case '$lte':
-                          subConditions.push(`json_extract(elements.value, '$.${subField}') <= ?`);
-                          params.push(opValue);
-                          break;
-                        // Add other operators as needed
-                      }
-                    }
-                    return subConditions.join(' AND ');
-                  } else {
-                    // Simple equality for direct value
-                    params.push(subValue);
-                    return `json_extract(elements.value, '$.${subField}') = ?`;
-                  }
-                })
-                .join(' AND ');
-
-              elemMatchSubquery += elemConditions;
-            } else {
-              // Simple equality check for the entire element
-              params.push(subFilter);
-              elemMatchSubquery += `elements.value = ?`;
-            }
-
-            elemMatchSubquery += ')';
-
-            return `${checkArrayCondition} AND ${elemMatchSubquery}`;
-          })
-          .join(' AND ');
-
-        conditions.push(`(${elemMatchConditions})`);
-      } else {
-        // Handle field conditions
-        if (key.startsWith('$')) continue; // Skip logical operators already handled
-
-        const value = filter[key as keyof Filter<T>];
+        conditions.push(`(${arrayConditions})`);
+      }
+      // Handle regular field conditions
+      else if (!key.startsWith('$')) {
+        // It's a field path
         if (key === '_id') {
           if (typeof value === 'string') {
-            conditions.push('_id = ?');
-            params.push(value);
-          } else if (
-            typeof value === 'object' &&
-            value !== null &&
-            (value as QueryOperators<string>).$in
-          ) {
-            const inValues = (value as QueryOperators<string>).$in as string[];
-            if (inValues.length > 0) {
-              conditions.push(`_id IN (${inValues.map(() => '?').join(',')})`);
-              params.push(...inValues);
-            } else {
-              conditions.push('1=0'); // No values in $in means nothing matches
-            }
-          } else if (
-            typeof value === 'object' &&
-            value !== null &&
-            (value as QueryOperators<string>).$ne
-          ) {
-            conditions.push('_id <> ?');
-            params.push((value as QueryOperators<string>).$ne);
+            conditions.push(this.buildComparisonCondition('_id', '$eq', value, params));
+          } else if (typeof value === 'object' && value !== null) {
+            // Handle operators on _id
+            const opConditions = Object.entries(value)
+              .map(([op, opValue]) => this.buildComparisonCondition('_id', op, opValue, params))
+              .join(' AND ');
+            conditions.push(`(${opConditions})`);
           }
-          // Add other _id specific operators if needed
         } else {
-          const jsonPath = this.parseJsonPath(key);
+          // Regular field with JSON path
           if (typeof value === 'object' && value !== null) {
-            // Handle operators like $gt, $lt, $in, $exists, $not etc.
-            for (const op in value) {
-              const opValue = (value as QueryOperators<any>)[op as keyof QueryOperators<any>];
-              switch (op) {
-                case '$eq':
-                  conditions.push(`json_extract(data, ${jsonPath}) = ?`);
-                  params.push(opValue);
-                  break;
-                case '$ne':
-                  if (opValue === null) {
-                    conditions.push(`json_extract(data, ${jsonPath}) IS NOT NULL`);
-                  } else {
-                    conditions.push(`json_extract(data, ${jsonPath}) != ?`);
-                    params.push(opValue);
-                  }
-                  break;
-                case '$gt':
-                  conditions.push(`json_extract(data, ${jsonPath}) > ?`);
-                  params.push(opValue);
-                  break;
-                case '$gte':
-                  conditions.push(`json_extract(data, ${jsonPath}) >= ?`);
-                  params.push(opValue);
-                  break;
-                case '$lt':
-                  conditions.push(`json_extract(data, ${jsonPath}) < ?`);
-                  params.push(opValue);
-                  break;
-                case '$lte':
-                  conditions.push(`json_extract(data, ${jsonPath}) <= ?`);
-                  params.push(opValue);
-                  break;
-                case '$in':
-                  if (Array.isArray(opValue) && opValue.length > 0) {
-                    const inConditions = opValue
-                      .map(() => `json_extract(data, ${jsonPath}) = ?`)
-                      .join(' OR ');
-                    conditions.push(`(${inConditions})`);
-                    opValue.forEach((val) => params.push(val));
-                  } else {
-                    conditions.push('1=0'); // Empty $in array, nothing will match
-                  }
-                  break;
-                case '$nin':
-                  if (Array.isArray(opValue) && opValue.length > 0) {
-                    const ninConditions = opValue
-                      .map(() => `json_extract(data, ${jsonPath}) != ?`)
-                      .join(' AND ');
-                    conditions.push(`(${ninConditions})`);
-                    opValue.forEach((val) => params.push(val));
-                  }
-                  // Empty $nin array means match everything, so no condition needed
-                  break;
-                case '$exists':
-                  if (opValue === true) {
-                    conditions.push(`json_extract(data, ${jsonPath}) IS NOT NULL`);
-                  } else {
-                    conditions.push(`json_extract(data, ${jsonPath}) IS NULL`);
-                  }
-                  break;
-                case '$not':
-                  // Handle negation of conditions
-                  const notCondition = this.buildWhereClause(
-                    { [key]: opValue } as Filter<T>,
-                    params
-                  );
-                  conditions.push(`NOT (${notCondition})`);
-                  break;
-                case '$all':
-                  if (Array.isArray(opValue) && opValue.length > 0) {
-                    // Check if the field is an array
-                    const arrayTypeCheck = `json_type(json_extract(data, ${jsonPath})) = 'array'`;
+            // Check if any key is an operator
+            const hasOperators = Object.keys(value).some((k) => k.startsWith('$'));
 
-                    // For each value in the $all array, create a subquery to check if it exists in the array
-                    const allConditions = opValue
-                      .map(() => {
-                        return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${jsonPath})) WHERE json_each.value = ?)`;
-                      })
-                      .join(' AND ');
-
-                    conditions.push(`(${arrayTypeCheck} AND ${allConditions})`);
-                    opValue.forEach((val) => params.push(val));
-                  } else {
-                    conditions.push('1=0'); // Empty $all array, nothing will match
+            if (hasOperators) {
+              // Handle operators for this field
+              const opConditions = Object.entries(value)
+                .map(([op, opValue]) => {
+                  if (op === '$elemMatch' || op === '$all') {
+                    return this.buildArraySubquery(key, op, opValue, params);
                   }
-                  break;
-                case '$elemMatch':
-                  // Handle array element match
-                  // For nested.items we need to check for conditions on the same array element
-                  // Build a query that checks if there's at least one array element that satisfies all conditions
-                  const arrayPath = this.parseJsonPath(key);
-                  let elemMatchSubquery = `EXISTS (
-                    SELECT 1 
-                    FROM json_each(json_extract(data, ${arrayPath})) as array_elements 
-                    WHERE `;
-
-                  // Process each condition in the $elemMatch
-                  if (typeof opValue === 'object' && opValue !== null) {
-                    const subConditions = Object.entries(opValue)
-                      .map(([sfKey, sfValue]) => {
-                        if (typeof sfValue === 'object' && sfValue !== null) {
-                          // Handle operators in the subfilter
-                          const subOpConditions: string[] = [];
-                          for (const op in sfValue) {
-                            const opVal = sfValue[op as keyof QueryOperators<any>];
-                            switch (op) {
-                              case '$eq':
-                                subOpConditions.push(
-                                  `json_extract(array_elements.value, '$.${sfKey}') = ?`
-                                );
-                                params.push(opVal);
-                                break;
-                              case '$gt':
-                                subOpConditions.push(
-                                  `json_extract(array_elements.value, '$.${sfKey}') > ?`
-                                );
-                                params.push(opVal);
-                                break;
-                              case '$gte':
-                                subOpConditions.push(
-                                  `json_extract(array_elements.value, '$.${sfKey}') >= ?`
-                                );
-                                params.push(opVal);
-                                break;
-                              case '$lt':
-                                subOpConditions.push(
-                                  `json_extract(array_elements.value, '$.${sfKey}') < ?`
-                                );
-                                params.push(opVal);
-                                break;
-                              case '$lte':
-                                subOpConditions.push(
-                                  `json_extract(array_elements.value, '$.${sfKey}') <= ?`
-                                );
-                                params.push(opVal);
-                                break;
-                              // Add other operators as needed
-                            }
-                          }
-                          return subOpConditions.join(' AND ');
-                        } else {
-                          // Simple equality for direct value
-                          params.push(sfValue);
-                          return `json_extract(array_elements.value, '$.${sfKey}') = ?`;
-                        }
-                      })
-                      .join(' AND ');
-
-                    elemMatchSubquery += subConditions;
-                  } else {
-                    // Simple equality check for the entire element
-                    params.push(opValue);
-                    elemMatchSubquery += `array_elements.value = ?`;
-                  }
-
-                  elemMatchSubquery += ')';
-                  conditions.push(elemMatchSubquery);
-                  break;
-                // Add other operators as needed
-              }
+                  return this.buildComparisonCondition(key, op, opValue, params);
+                })
+                .join(' AND ');
+              conditions.push(`(${opConditions})`);
+            } else {
+              // This is an object equality check (exact match)
+              const jsonPath = this.parseJsonPath(key);
+              conditions.push(`json_extract(data, ${jsonPath}) = ?`);
+              params.push(JSON.stringify(value));
             }
           } else {
-            // Direct equality for non-object values
-            if (value === null) {
-              conditions.push(`json_extract(data, ${jsonPath}) IS NULL`);
-            } else {
-              conditions.push(`json_extract(data, ${jsonPath}) = ?`);
-              params.push(value);
-            }
+            // Simple equality check
+            conditions.push(this.buildComparisonCondition(key, '$eq', value, params));
           }
         }
       }
     }
+
     return conditions.length > 0 ? conditions.join(' AND ') : '1=1';
   }
 
@@ -482,20 +396,20 @@ export class FindCursor<T extends DocumentWithId> {
           if (key.includes('.')) {
             // Handle nested paths for inclusion (basic implementation)
             const path = key.split('.');
-            let current: any = doc;
-            let target: any = projectedDoc;
+            let current = doc as Record<string, unknown>;
+            let target = projectedDoc as Record<string, unknown>;
 
             // Navigate to the last parent in the path
             for (let i = 0; i < path.length - 1; i++) {
               const segment = path[i];
-              if (current[segment] === undefined) break;
+              if (current[segment] === undefined || current[segment] === null) break;
 
               if (target[segment] === undefined) {
                 target[segment] = {};
               }
 
-              current = current[segment];
-              target = target[segment];
+              current = current[segment] as Record<string, unknown>;
+              target = target[segment] as Record<string, unknown>;
             }
 
             // Set the final property if we reached it
@@ -523,13 +437,13 @@ export class FindCursor<T extends DocumentWithId> {
           if (key.includes('.')) {
             // Handle nested paths for exclusion (basic implementation)
             const path = key.split('.');
-            let current: any = projectedDoc;
+            let current = projectedDoc as Record<string, unknown>;
 
             // Navigate to the parent of the property to exclude
             for (let i = 0; i < path.length - 1; i++) {
               const segment = path[i];
               if (current[segment] === undefined) break;
-              current = current[segment];
+              current = current[segment] as Record<string, unknown>;
             }
 
             // Delete the final property if we reached its parent
