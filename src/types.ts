@@ -79,9 +79,9 @@ export interface UpdateOperators<T> {
     [key: string]: any; // For dot notation and nested fields
   };
   $unset?: {
-    [P in keyof T]?: "";
+    [P in keyof T]?: '';
   } & {
-    [key: string]: "";
+    [key: string]: '';
   };
   $inc?: {
     [P in keyof T]?: number;
@@ -122,3 +122,11 @@ export type Projection<T> = {
 } & {
   [key: string]: 0 | 1 | boolean; // For dot notation and nested fields
 };
+
+/** * Represents a row in the SQLite database.
+ * The data field is a JSON string representing the document.
+ */
+export interface SQLiteRow {
+  _id: string;
+  data: string; // JSON string
+}
