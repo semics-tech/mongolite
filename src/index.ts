@@ -42,6 +42,22 @@ export class MongoLite {
   }
 
   /**
+   * Lists all collections (tables) in the database.
+   * @returns An object with a toArray method that resolves to an array of collection names.
+   */
+  listCollections(): { toArray: () => Promise<string[]> } {
+    // Query the SQLite schema to get all user-created tables
+    return {
+      toArray: async () => {
+        const result = await this.db.all<{ name: string }>(
+          `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
+        );
+        return result.map((row) => row.name);
+      },
+    };
+  }
+
+  /**
    * Gets a collection (table) in the database.
    * @param name The name of the collection.
    * @returns A MongoLiteCollection instance.

@@ -134,6 +134,16 @@ Explicitly opens the database connection. Operations will automatically connect 
 
 Closes the database connection.
 
+#### `listCollections(): Promise<string[]>`
+
+Lists all collections (tables) in the database.
+
+```typescript
+// Get all collections
+const collections = await client.listCollections().toArray();
+console.log('Available collections:', collections);
+```
+
 #### `collection<T extends DocumentWithId = DocumentWithId>(name: string): MongoLiteCollection<T>`
 
 Gets a reference to a collection (table).
