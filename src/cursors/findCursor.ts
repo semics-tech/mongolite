@@ -72,6 +72,9 @@ export class FindCursor<T extends DocumentWithId> {
 
     switch (operator) {
       case '$eq':
+        if (value === null) {
+          return `${jsonPath} IS NULL`;
+        }
         params.push(value);
         return `${jsonPath} = ?`;
       case '$ne':
@@ -197,7 +200,6 @@ export class FindCursor<T extends DocumentWithId> {
 
   private buildWhereClause(filter: Filter<T>, params: unknown[]): string {
     const conditions: string[] = [];
-    console.log('Building where clause for filter:', JSON.stringify(filter));
 
     for (const key of Object.keys(filter)) {
       const value = filter[key as keyof Filter<T>];
@@ -300,6 +302,9 @@ export class FindCursor<T extends DocumentWithId> {
     const sql = `SELECT _id, data FROM "${this.collectionName}" WHERE ${whereClause}`;
 
     if (this.options.verbose) {
+      console.log(`Building SQL query for collection "${this.collectionName}"`);
+      console.log(`Filter: ${JSON.stringify(filter)}`);
+      console.log(`Where Clause: ${whereClause}`);
       console.log(`SQL Query: ${sql}`);
       console.log(`Parameters: ${JSON.stringify(params)}`);
     }

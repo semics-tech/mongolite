@@ -5,7 +5,7 @@ import { MongoLiteCollection, DocumentWithId } from '../src/index'; // Assuming 
 
 interface TestDoc extends DocumentWithId {
   name: string;
-  value: number;
+  value: number | null; // Allow null for testing
   tags?: string[];
   nested?: { subValue: string };
 }
@@ -14,11 +14,12 @@ describe('MongoLiteCollection - Find Operations', () => {
   let client: MongoLite;
   let collection: MongoLiteCollection<TestDoc>;
   const testDocs: TestDoc[] = [
-    { _id: '1', name: 'doc1', value: 10, tags: ['a', 'b'] },
-    { _id: '2', name: 'doc2', value: 20, tags: ['b', 'c'] },
+    { _id: '1', name: 'doc1', value: 10, match: 'test', tags: ['a', 'b'] },
+    { _id: '2', name: 'doc2', value: 20, match: 'test', tags: ['b', 'c'] },
     { _id: '3', name: 'doc3', value: 30, tags: ['c', 'd'], nested: { subValue: 'sv1' } },
     { _id: '4', name: 'doc4', value: 20 }, // No tags, no nested
-    { _id: '5', name: 'anotherDoc', value: 50, nested: { subValue: 'sv2' } },
+    { _id: '5', name: 'anotherDoc', value: 50, match: 'test', nested: { subValue: 'sv2' } },
+    { _id: '6', name: 'emptyDoc', value: null, match: 'test' }, // Document with null value,
   ];
 
   beforeEach(async () => {
@@ -154,7 +155,7 @@ describe('MongoLiteCollection - Find Operations', () => {
       const docsWithTags = await collection.find({ tags: { $exists: true } }).toArray();
       assert.strictEqual(docsWithTags.length, 3);
       const docsWithoutTags = await collection.find({ tags: { $exists: false } }).toArray();
-      assert.strictEqual(docsWithoutTags.length, 2);
+      assert.strictEqual(docsWithoutTags.length, 3);
     });
 
     it('should find documents with projection (include fields)', async () => {
@@ -171,14 +172,14 @@ describe('MongoLiteCollection - Find Operations', () => {
 
     it('should find documents with sort (ascending)', async () => {
       const docs = await collection.find({}).sort({ value: 1 }).toArray();
-      assert.strictEqual(docs.length, 5);
-      assert.strictEqual(docs[0].value, 10);
-      assert.strictEqual(docs[4].value, 50);
+      assert.strictEqual(docs.length, 6);
+      assert.strictEqual(docs[0].value, null);
+      assert.strictEqual(docs[4].value, 30);
     });
 
     it('should find documents with sort (descending)', async () => {
       const docs = await collection.find({}).sort({ value: -1 }).toArray();
-      assert.strictEqual(docs.length, 5);
+      assert.strictEqual(docs.length, 6);
       assert.strictEqual(docs[0].value, 50);
       assert.strictEqual(docs[4].value, 10);
     });
@@ -186,24 +187,22 @@ describe('MongoLiteCollection - Find Operations', () => {
     it('should find documents with limit', async () => {
       const docs = await collection.find({}).sort({ value: 1 }).limit(2).toArray(); // Sort to make it deterministic
       assert.strictEqual(docs.length, 2);
-      assert.strictEqual(docs[0].value, 10);
-      assert.strictEqual(docs[1].value, 20); // Could be doc2 or doc4, depending on insertion or internal order
+      assert.strictEqual(docs[0].value, null);
+      assert.strictEqual(docs[1].value, 10); // Could be doc2 or doc4, depending on insertion or internal order
     });
 
     it('should find documents with skip', async () => {
       const docs = await collection.find({}).sort({ value: 1 }).skip(3).toArray(); // Sort to make it deterministic
-      assert.strictEqual(docs.length, 2);
-      assert.strictEqual(docs[0].value, 30); // doc3
-      assert.strictEqual(docs[1].value, 50); // anotherDoc
+      assert.strictEqual(docs.length, 3);
+      assert.strictEqual(docs[0].value, 20);
+      assert.strictEqual(docs[1].value, 30);
     });
 
     it('should find documents with skip and limit', async () => {
       const docs = await collection.find({}).sort({ value: 1 }).skip(1).limit(2).toArray();
       assert.strictEqual(docs.length, 2);
-      // Original order by value: 10 (doc1), 20 (doc2), 20 (doc4), 30 (doc3), 50 (anotherDoc)
-      // After skip 1: 20 (doc2), 20 (doc4), 30 (doc3), 50 (anotherDoc)
-      // After limit 2: 20 (doc2), 20 (doc4) - or some combination of value 20 docs
-      assert.ok(docs.every((d) => d.value === 20));
+      assert.strictEqual(docs[0].value, 10);
+      assert.strictEqual(docs[1].value, 20); // Could be doc2 or doc4, depending on insertion or internal order
     });
 
     it('should handle complex query with multiple operators and options', async () => {
@@ -228,15 +227,45 @@ describe('MongoLiteCollection - Find Operations', () => {
     it('handle query with filter and $or operator', async () => {
       const docs = await collection
         .find({
-          value: 20,
+          match: 'test',
+          $or: [{ value: { $gte: 20 } }],
+        })
+        .toArray();
+
+      // Should match  anotherDoc (value=50) and doc2 (value=20)
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === '2')); // doc2 has value=20
+      assert.ok(docs.some((d) => d._id === '5')); // anotherDoc has value=50 and tags exist
+    });
+
+    it('handle query with filter and two $or operators', async () => {
+      const docs = await collection
+        .find({
+          match: 'test',
           $or: [{ value: { $gte: 20 } }, { tags: { $exists: true } }],
         })
         .toArray();
 
-      // Should match doc2 and doc4 (both have value 20)
-      assert.strictEqual(docs.length, 2);
-      assert.ok(docs.some((d) => d._id === '2')); // doc2
-      assert.ok(docs.some((d) => d._id === '4')); // doc4
+      // Should match doc1, doc2, and anotherDoc (tags exist or value >= 20)
+      assert.strictEqual(docs.length, 3);
+      assert.ok(docs.some((d) => d._id === '1')); // doc1 has value=10 and tags exist
+      assert.ok(docs.some((d) => d._id === '2')); // doc2 has value=20 and tags exist
+      assert.ok(docs.some((d) => d._id === '5')); // anotherDoc has value=50 and tags exist
+    });
+
+    it('handle query with filter and two same $or operators', async () => {
+      const docs = await collection
+        .find({
+          match: 'test',
+          $or: [{ value: { $gte: 20 } }, { value: null }],
+        })
+        .toArray();
+
+      // Should match doc1, doc2, and anotherDoc (tags exist or value >= 20)
+      assert.strictEqual(docs.length, 3);
+      assert.ok(docs.some((d) => d._id === '2')); // doc2 has value=20 and tags exist
+      assert.ok(docs.some((d) => d._id === '5')); // anotherDoc has value=50 and tags exist
+      assert.ok(docs.some((d) => d._id === '6')); // emptyDoc has value=null and match=test
     });
   });
 });
