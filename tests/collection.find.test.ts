@@ -6,7 +6,7 @@ import { MongoLiteCollection, DocumentWithId } from '../src/index'; // Assuming 
 interface TestDoc extends DocumentWithId {
   name: string;
   value: number | null; // Allow null for testing
-  tags?: string[];
+  tags?: string[] | string; // Allow single string or array of strings
   nested?: { subValue: string };
 }
 
@@ -266,6 +266,26 @@ describe('MongoLiteCollection - Find Operations', () => {
       assert.ok(docs.some((d) => d._id === '2')); // doc2 has value=20 and tags exist
       assert.ok(docs.some((d) => d._id === '5')); // anotherDoc has value=50 and tags exist
       assert.ok(docs.some((d) => d._id === '6')); // emptyDoc has value=null and match=test
+    });
+
+    it('handle query for a single value in an array field', async () => {
+      const docs = await collection.find({ tags: 'b' }).toArray();
+
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === '1')); // doc1 has tags ['a', 'b']
+      assert.ok(docs.some((d) => d._id === '2')); // doc2 has tags ['b', 'c']
+    });
+
+    it('should handle query with null value', async () => {
+      const docs = await collection.find({ value: null }).toArray();
+      assert.strictEqual(docs.length, 1);
+      assert.deepStrictEqual(docs[0], testDocs[5]); // emptyDoc with value: null
+    });
+
+    it('should handle query with nested object field', async () => {
+      const docs = await collection.find({ 'nested.subValue': 'sv2' }).toArray();
+      assert.strictEqual(docs.length, 1);
+      assert.deepStrictEqual(docs[0], testDocs[4]); // anotherDoc with nested.subValue: 'sv2'
     });
   });
 });

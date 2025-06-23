@@ -75,8 +75,11 @@ export class FindCursor<T extends DocumentWithId> {
         if (value === null) {
           return `${jsonPath} IS NULL`;
         }
+
+        // Handle string matching for equality and array matching as par mongodb client
         params.push(value);
-        return `${jsonPath} = ?`;
+        params.push(value);
+        return `(${jsonPath} = ? OR ${jsonPath} LIKE '%' || ? || '%')`; // For string matching
       case '$ne':
         if (value === null) {
           return `${jsonPath} IS NOT NULL`;
