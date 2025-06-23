@@ -203,7 +203,6 @@ export class FindCursor<T extends DocumentWithId> {
 
     for (const key of Object.keys(filter)) {
       const value = filter[key as keyof Filter<T>];
-      console.log(`Processing key: ${key}, value:`, JSON.stringify(value));
 
       // Handle logical operators
       if (key === '$and' && filter.$and) {
