@@ -192,7 +192,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     // If no document found and upsert is requested, create a new document
     if (!rowToUpdate && options.upsert) {
       // Check if _id is a valid ObjectId or provided
-      if (update.$set?._id && ObjectId.isValid(update.$set._id)) {
+      if (update.$set?._id && !ObjectId.isValid(update.$set._id)) {
         throw new Error(`_id must be a valid ObjectId or not provided for upsert in ${this.name}`);
       }
       // Generate a new _id if not provided
