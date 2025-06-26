@@ -13,7 +13,7 @@ export interface MongoLiteOptions {
  * to simplify database operations.
  */
 export class SQLiteDB {
-  private db: Database | null = null;
+  private db: Database.Database | null = null;
   private readonly filePath: string;
   private readonly verbose: boolean;
   private readonly readOnly: boolean;
@@ -85,10 +85,10 @@ export class SQLiteDB {
   /**
    * Ensures the database connection is open before performing an operation.
    * @private
-   * @returns {Promise<Database>} The active database instance.
+   * @returns {Promise<Database.Database>} The active database instance.
    * @throws {Error} If the database is not connected.
    */
-  private async ensureConnected(): Promise<Database> {
+  private async ensureConnected(): Promise<Database.Database> {
     if (!this.db || !this.openPromise) {
       await this.connect();
     } else {
@@ -204,10 +204,10 @@ export class SQLiteDB {
   /**
    * Gets the underlying better-sqlite3 Database instance.
    * Useful for operations not covered by this wrapper, like transactions.
-   * @returns {Promise<Database>} The raw database object.
+   * @returns {Promise<Database.Database>} The raw database object.
    * @throws {Error} If the database is not connected.
    */
-  public async getDbInstance(): Promise<Database> {
+  public async getDbInstance(): Promise<Database.Database> {
     return this.ensureConnected();
   }
 
