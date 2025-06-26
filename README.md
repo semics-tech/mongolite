@@ -18,12 +18,12 @@ A MongoDB-like client that uses SQLite as its underlying persistent store. Writt
 ## Installation
 
 ```bash
-npm install mongolite-ts sqlite3
+npm install mongolite-ts better-sqlite3
 # or
-yarn add mongolite-ts sqlite3
+yarn add mongolite-ts better-sqlite3
 ```
 
-**Note:** `sqlite3` is a peer dependency and needs to be installed separately.
+**Note:** `better-sqlite3` is a peer dependency and needs to be installed separately.
 
 ## Usage
 

@@ -148,12 +148,12 @@ A MongoDB-like client that uses SQLite as its underlying persistent store. Writt
 ## Installation
 
 ```bash
-npm install mongolite-ts sqlite3
+npm install mongolite-ts better-sqlite3
 # or
-yarn add mongolite-ts sqlite3
+yarn add mongolite-ts better-sqlite3
 ```
 
-**Note:** `sqlite3` is a peer dependency and needs to be installed separately.
+**Note:** `better-sqlite3` is a peer dependency and needs to be installed separately.
 
 ## Usage
 
@@ -254,7 +254,7 @@ Creates a new `MongoLite` client instance.
 * `dbPathOrOptions`: Either a string path to the SQLite database file (e.g., `'./mydb.sqlite'`, `':memory:'`) or an options object.
     * `MongoLiteOptions`:
         * `filePath`: string - Path to the SQLite database file.
-        * `verbose?`: boolean - (Optional) Enable verbose logging from the `sqlite3` driver.
+        * `verbose?`: boolean - (Optional) Enable verbose logging from the `better-sqlite3` driver.
 
 #### `async connect(): Promise<void>`
 

@@ -2,6 +2,19 @@ import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../
 import { SQLiteDB } from '../db.js';
 
 /**
+ * Helper function to convert JavaScript values to SQLite-compatible values.
+ * This ensures that boolean values are converted to 0/1 integers that SQLite can handle.
+ * @param value The value to convert
+ * @returns A SQLite-compatible value
+ */
+function toSQLiteValue(value: unknown): unknown {
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+  return value;
+}
+
+/**
  * Represents a cursor for find operations, allowing chaining of limit, skip, and sort.
  */
 export class FindCursor<T extends DocumentWithId> {
@@ -41,20 +54,22 @@ export class FindCursor<T extends DocumentWithId> {
     if (field === '_id' && elementPrefix === 'data') {
       switch (operator) {
         case '$eq':
-          params.push(value);
+          params.push(toSQLiteValue(value));
           return '_id = ?';
         case '$ne':
-          params.push(value);
+          params.push(toSQLiteValue(value));
           return '_id <> ?';
         case '$in':
           if (Array.isArray(value) && value.length > 0) {
-            params.push(...value);
+            // Convert each value to SQLite-compatible type
+            params.push(...value.map(v => toSQLiteValue(v)));
             return `_id IN (${value.map(() => '?').join(',')})`;
           }
           return '1=0'; // Empty array, nothing matches
         case '$nin':
           if (Array.isArray(value) && value.length > 0) {
-            params.push(...value);
+            // Convert each value to SQLite-compatible type
+            params.push(...value.map(v => toSQLiteValue(v)));
             return `_id NOT IN (${value.map(() => '?').join(',')})`;
           }
           return '1=1'; // Empty array, everything matches
@@ -77,40 +92,40 @@ export class FindCursor<T extends DocumentWithId> {
         }
 
         // Handle string matching for equality and array matching as par mongodb client
-        params.push(value);
-        params.push(value);
+        params.push(toSQLiteValue(value));
+        params.push(toSQLiteValue(value));
         return `(${jsonPath} = ? OR ${jsonPath} LIKE '%' || ? || '%')`; // For string matching
       case '$ne':
         if (value === null) {
           return `${jsonPath} IS NOT NULL`;
         }
-        params.push(value);
+        params.push(toSQLiteValue(value));
         return `${jsonPath} != ?`;
       case '$gt':
-        params.push(value);
+        params.push(toSQLiteValue(value));
         return `${jsonPath} > ?`;
       case '$gte':
-        params.push(value);
+        params.push(toSQLiteValue(value));
         return `${jsonPath} >= ?`;
       case '$lt':
-        params.push(value);
+        params.push(toSQLiteValue(value));
         return `${jsonPath} < ?`;
       case '$lte':
-        params.push(value);
+        params.push(toSQLiteValue(value));
         return `${jsonPath} <= ?`;
       case '$exists':
         return value ? `${jsonPath} IS NOT NULL` : `${jsonPath} IS NULL`;
       case '$in':
         if (Array.isArray(value) && value.length > 0) {
           const conditions = value.map(() => `${jsonPath} = ?`).join(' OR ');
-          params.push(...value);
+          params.push(...value.map(v => toSQLiteValue(v)));
           return `(${conditions})`;
         }
         return '1=0'; // Empty array, nothing matches
       case '$nin':
         if (Array.isArray(value) && value.length > 0) {
           const conditions = value.map(() => `${jsonPath} != ?`).join(' AND ');
-          params.push(...value);
+          params.push(...value.map(v => toSQLiteValue(v)));
           return `(${conditions})`;
         }
         return '1=1'; // Empty array, everything matches

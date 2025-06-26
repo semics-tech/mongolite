@@ -1,6 +1,6 @@
 {
   "name": "mongolite-ts",
-  "version": "0.1.28",
+  "version": "0.2.0",
   "description": "A MongoDB-like client using SQLite as a persistent store, written in TypeScript.",
   "main": "dist/index.js",
   "type": "module",
@@ -36,8 +36,8 @@
   },
   "homepage": "https://github.com/semics-tech/mongolite-ts#readme",
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.17.57",
-    "@types/sqlite3": "^3.1.11",
     "@typescript-eslint/eslint-plugin": "^7.9.0",
     "@typescript-eslint/parser": "^7.9.0",
     "c8": "^9.1.0",
@@ -51,8 +51,8 @@
   },
   "dependencies": {
     "@types/uuid": "^9.0.8",
+    "better-sqlite3": "^12.1.1",
     "bson": "^6.10.4",
-    "sqlite3": "^5.1.7",
     "uuid": "^9.0.1"
   },
   "files": [

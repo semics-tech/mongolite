@@ -168,7 +168,7 @@ describe('MongoLiteCollection - Insert Operations', () => {
       } catch (error) {
         assert.ok(error instanceof Error);
         assert.ok(
-          error.message.includes('Duplicate _id: existing'),
+          error.message.includes('UNIQUE constraint failed: testInsertCollection._id'),
           `Error message should mention uniqueness violation: ${error.message}`
         );
 

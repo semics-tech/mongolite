@@ -1,31 +1,23 @@
-import sqlite3 from 'sqlite3';
-import { promisify } from 'util';
-
-// Promisify sqlite3 methods
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Sqlite3Database = sqlite3.Database & {
-  getAsync?: <T = any>(sql: string, params?: any) => Promise<T>;
-  runAsync?: (sql: string, params?: any) => Promise<sqlite3.RunResult>;
-  allAsync?: <T = any>(sql: string, params?: any) => Promise<T[]>;
-  closeAsync?: () => Promise<void>;
-  execAsync?: (sql: string) => Promise<void>;
-};
+import Database from 'better-sqlite3';
+import type { Statement } from 'better-sqlite3';
 
 export interface MongoLiteOptions {
   filePath: string;
   verbose?: boolean;
-  readOnly?: boolean; // Add readOnly option
+  readOnly?: boolean;
+  WAL?: boolean; // Add Write-Ahead Logging option
 }
 
 /**
- * SQLiteDB class provides a wrapper around the sqlite3 library
- * to simplify database operations using Promises.
+ * SQLiteDB class provides a wrapper around the better-sqlite3 library
+ * to simplify database operations.
  */
 export class SQLiteDB {
-  private db: Sqlite3Database | null = null;
+  private db: Database | null = null;
   private readonly filePath: string;
   private readonly verbose: boolean;
   private readonly readOnly: boolean;
+  private readonly WAL: boolean;
   private openPromise: Promise<void> | null = null;
 
   /**
@@ -38,14 +30,12 @@ export class SQLiteDB {
       this.filePath = dbPathOrOptions;
       this.verbose = false;
       this.readOnly = false;
+      this.WAL = false;
     } else {
       this.filePath = dbPathOrOptions.filePath;
       this.verbose = dbPathOrOptions.verbose || false;
       this.readOnly = dbPathOrOptions.readOnly || false;
-    }
-
-    if (this.verbose) {
-      sqlite3.verbose();
+      this.WAL = dbPathOrOptions.WAL || true;
     }
   }
 
@@ -63,43 +53,42 @@ export class SQLiteDB {
     }
 
     this.openPromise = new Promise((resolve, reject) => {
-      const mode = this.readOnly
-        ? sqlite3.OPEN_READONLY
-        : sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE;
-      this.db = new sqlite3.Database(this.filePath, mode, (err) => {
-        if (err) {
-          console.error(`Error opening database ${this.filePath}:`, err.message);
-          this.db = null; // Ensure db is null on error
-          this.openPromise = null;
-          return reject(err);
+      try {
+        const options: Database.Options = {
+          readonly: this.readOnly,
+          verbose: this.verbose ? console.log : undefined,
+        };
+
+        this.db = new Database(this.filePath, options);
+
+        // Enable Write-Ahead Logging if requested
+        if (this.WAL && !this.readOnly) {
+          this.db.pragma('journal_mode = WAL');
         }
+
         if (this.verbose) {
           console.log(`SQLite database opened: ${this.filePath}`);
         }
-        // Promisify methods for the current db instance
-        if (this.db) {
-          // Use explicit type casting to ensure proper TypeScript types
-          this.db.getAsync = promisify(this.db.get).bind(this.db) as Sqlite3Database['getAsync'];
-          this.db.runAsync = promisify(this.db.run).bind(this.db) as Sqlite3Database['runAsync'];
-          this.db.allAsync = promisify(this.db.all).bind(this.db) as Sqlite3Database['allAsync'];
-          this.db.closeAsync = promisify(this.db.close).bind(
-            this.db
-          ) as Sqlite3Database['closeAsync'];
-          this.db.execAsync = promisify(this.db.exec).bind(this.db) as Sqlite3Database['execAsync'];
-        }
+
         resolve();
-      });
+      } catch (err) {
+        console.error(`Error opening database ${this.filePath}:`, (err as Error).message);
+        this.db = null;
+        this.openPromise = null;
+        reject(err);
+      }
     });
+
     return this.openPromise;
   }
 
   /**
    * Ensures the database connection is open before performing an operation.
    * @private
-   * @returns {Promise<Sqlite3Database>} The active database instance.
+   * @returns {Promise<Database>} The active database instance.
    * @throws {Error} If the database is not connected.
    */
-  private async ensureConnected(): Promise<Sqlite3Database> {
+  private async ensureConnected(): Promise<Database> {
     if (!this.db || !this.openPromise) {
       await this.connect();
     } else {
@@ -117,12 +106,23 @@ export class SQLiteDB {
    * Executes a SQL query that does not return rows (e.g., INSERT, UPDATE, DELETE, CREATE).
    * @param {string} sql - The SQL query string.
    * @param {any[]} [params=[]] - Parameters for the SQL query.
-   * @returns {Promise<sqlite3.RunResult>} Result of the execution (e.g., lastID, changes).
+   * @returns {Promise<{ lastID: number, changes: number }>} Result of the execution.
    */
-  public async run(sql: string, params: unknown[] = []): Promise<sqlite3.RunResult> {
+  public async run(
+    sql: string,
+    params: unknown[] = []
+  ): Promise<{ lastID: number; changes: number }> {
     const dbInstance = await this.ensureConnected();
-    if (!dbInstance.runAsync) throw new Error('runAsync not initialized');
-    return dbInstance.runAsync(sql, params);
+    try {
+      const result = dbInstance.prepare(sql).run(...params);
+      return {
+        lastID: result.lastInsertRowid as number,
+        changes: result.changes,
+      };
+    } catch (err) {
+      console.error(`Error running SQL: ${sql}`, err);
+      throw err;
+    }
   }
 
   /**
@@ -133,8 +133,12 @@ export class SQLiteDB {
    */
   public async get<T>(sql: string, params: unknown[] = []): Promise<T | undefined> {
     const dbInstance = await this.ensureConnected();
-    if (!dbInstance.getAsync) throw new Error('getAsync not initialized');
-    return dbInstance.getAsync(sql, params) as Promise<T | undefined>;
+    try {
+      return dbInstance.prepare(sql).get(...params) as T | undefined;
+    } catch (err) {
+      console.error(`Error getting SQL: ${sql}`, err);
+      throw err;
+    }
   }
 
   /**
@@ -145,8 +149,12 @@ export class SQLiteDB {
    */
   public async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const dbInstance = await this.ensureConnected();
-    if (!dbInstance.allAsync) throw new Error('allAsync not initialized');
-    return dbInstance.allAsync(sql, params) as Promise<T[]>;
+    try {
+      return dbInstance.prepare(sql).all(...params) as T[];
+    } catch (err) {
+      console.error(`Error getting all SQL: ${sql}`, err);
+      throw err;
+    }
   }
 
   /**
@@ -156,8 +164,13 @@ export class SQLiteDB {
    */
   public async exec(sql: string): Promise<void> {
     const dbInstance = await this.ensureConnected();
-    if (!dbInstance.execAsync) throw new Error('execAsync not initialized');
-    return dbInstance.execAsync(sql);
+    try {
+      dbInstance.exec(sql);
+      return Promise.resolve();
+    } catch (err) {
+      console.error(`Error executing SQL: ${sql}`, err);
+      throw err;
+    }
   }
 
   /**
@@ -168,9 +181,9 @@ export class SQLiteDB {
     if (this.openPromise) {
       await this.openPromise; // Ensure any pending connection attempt is finished
     }
-    if (this.db && this.db.closeAsync) {
+    if (this.db) {
       try {
-        await this.db.closeAsync();
+        this.db.close();
         if (this.verbose) {
           console.log(`SQLite database closed: ${this.filePath}`);
         }
@@ -189,12 +202,52 @@ export class SQLiteDB {
   }
 
   /**
-   * Gets the underlying sqlite3.Database instance.
+   * Gets the underlying better-sqlite3 Database instance.
    * Useful for operations not covered by this wrapper, like transactions.
-   * @returns {Promise<sqlite3.Database>} The raw database object.
+   * @returns {Promise<Database>} The raw database object.
    * @throws {Error} If the database is not connected.
    */
-  public async getDbInstance(): Promise<sqlite3.Database> {
+  public async getDbInstance(): Promise<Database> {
     return this.ensureConnected();
+  }
+
+  /**
+   * Prepares a SQL statement for later execution.
+   * @param {string} sql - The SQL query string.
+   * @returns {Promise<Statement>} A prepared statement that can be executed multiple times.
+   */
+  public async prepare(sql: string): Promise<Statement> {
+    const dbInstance = await this.ensureConnected();
+    return dbInstance.prepare(sql);
+  }
+
+  /**
+   * Begins a transaction.
+   * @returns {Promise<void>}
+   */
+  public async beginTransaction(): Promise<void> {
+    const dbInstance = await this.ensureConnected();
+    dbInstance.prepare('BEGIN').run();
+    return Promise.resolve();
+  }
+
+  /**
+   * Commits a transaction.
+   * @returns {Promise<void>}
+   */
+  public async commitTransaction(): Promise<void> {
+    const dbInstance = await this.ensureConnected();
+    dbInstance.prepare('COMMIT').run();
+    return Promise.resolve();
+  }
+
+  /**
+   * Rolls back a transaction.
+   * @returns {Promise<void>}
+   */
+  public async rollbackTransaction(): Promise<void> {
+    const dbInstance = await this.ensureConnected();
+    dbInstance.prepare('ROLLBACK').run();
+    return Promise.resolve();
   }
 }
