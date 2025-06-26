@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { MongoLite } from '../src/index';
 import { MongoLiteCollection, DocumentWithId } from '../src/index';
+import { ObjectId } from 'bson';
 
 interface TestDoc extends DocumentWithId {
   name: string;
@@ -353,6 +354,88 @@ describe('MongoLiteCollection - Update Operations', () => {
 
       const updatedDocs = await collection.find({ name: 'replacedValue20' }).toArray();
       assert.strictEqual(updatedDocs.length, 1); // Only one document should have the new name
+    });
+  });
+
+  describe('updateOne() with upsert option', () => {
+    it('should create a new document when no document matches and upsert is true', async () => {
+      const newDoc = {
+        name: 'upsertedDoc',
+        value: 123,
+        tags: ['upsert', 'test'],
+      };
+
+      // Upsert with a non-existent _id
+      const result = await collection.updateOne(
+        { _id: 'nonexistent' },
+        { $set: newDoc },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(result.upsertedId !== null, 'upsertedId should not be null');
+
+      // Verify document was created
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, 'upsertedDoc');
+      assert.strictEqual(upsertedDoc?.value, 123);
+      assert.deepStrictEqual(upsertedDoc?.tags, ['upsert', 'test']);
+    });
+
+    it('should throw an error when trying to upsert with an invalid ObjectId in $set._id', async () => {
+      // Attempting to upsert with an invalid ObjectId in $set._id
+      await assert.rejects(
+        async () => {
+          await collection.updateOne(
+            { _id: 'nonexistent' },
+            { $set: { _id: 'invalid-object-id', name: 'shouldNotUpsert' } },
+            { upsert: true }
+          );
+        },
+        (error) => {
+          assert.ok(error instanceof Error);
+          assert.ok(
+            error.message.includes('_id must be a valid ObjectId or not provided for upsert')
+          );
+          return true;
+        },
+        'Should throw an error about invalid ObjectId'
+      );
+
+      // Verify no document was created
+      const docs = await collection.find({ name: 'shouldNotUpsert' }).toArray();
+      assert.strictEqual(docs.length, 0, 'No document should have been created');
+    });
+
+    it('should allow upsert with a valid ObjectId in $set._id', async () => {
+      // Generate a valid ObjectId string using the bson ObjectId
+      const validObjectId = new ObjectId().toString();
+
+      // Upsert with a valid ObjectId
+      const result = await collection.updateOne(
+        { _id: 'nonexistent' },
+        {
+          $set: {
+            _id: validObjectId,
+            name: 'validObjectIdUpsert',
+            value: 500,
+          },
+        },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.strictEqual(result.upsertedId, validObjectId);
+
+      // Verify document was created with the specified _id
+      const upsertedDoc = await collection.findOne({ _id: validObjectId });
+      assert.strictEqual(upsertedDoc?._id, validObjectId);
+      assert.strictEqual(upsertedDoc?.name, 'validObjectIdUpsert');
+      assert.strictEqual(upsertedDoc?.value, 500);
     });
   });
 });
