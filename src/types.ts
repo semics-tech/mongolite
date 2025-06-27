@@ -3,7 +3,7 @@
  */
 export interface DocumentWithId {
   _id?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -59,14 +59,23 @@ export interface LogicalOperators<T> {
 }
 
 /**
+ * Text search operator for full-text search.
+ */
+export interface TextSearchOperator {
+  $search: string;
+}
+
+/**
  * Filter type for querying documents.
  * T is the document type.
  */
 export type Filter<T> = {
   [P in keyof T]?: T[P] | QueryOperators<T[P]>;
 } & {
-  [key: string]: any; // For dot notation and nested fields
-} & Partial<LogicalOperators<T>>;
+  [key: string]: unknown; // For dot notation and nested fields
+} & Partial<LogicalOperators<T>> & {
+    $text?: TextSearchOperator; // Add text search operator
+  };
 
 /**
  * Operators for updating documents.
@@ -76,7 +85,7 @@ export interface UpdateOperators<T> {
   $set?: {
     [P in keyof T]?: T[P];
   } & {
-    [key: string]: any; // For dot notation and nested fields
+    [key: string]: unknown; // For dot notation and nested fields
   };
   $unset?: {
     [P in keyof T]?: '';
@@ -89,14 +98,14 @@ export interface UpdateOperators<T> {
     [key: string]: number;
   };
   $push?: {
-    [P in keyof T]?: any | { $each: any[] };
+    [P in keyof T]?: unknown | { $each: unknown[] };
   } & {
-    [key: string]: any | { $each: any[] };
+    [key: string]: unknown | { $each: unknown[] };
   };
   $pull?: {
-    [P in keyof T]?: any;
+    [P in keyof T]?: unknown;
   } & {
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 

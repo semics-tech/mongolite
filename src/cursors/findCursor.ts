@@ -62,14 +62,14 @@ export class FindCursor<T extends DocumentWithId> {
         case '$in':
           if (Array.isArray(value) && value.length > 0) {
             // Convert each value to SQLite-compatible type
-            params.push(...value.map(v => toSQLiteValue(v)));
+            params.push(...value.map((v) => toSQLiteValue(v)));
             return `_id IN (${value.map(() => '?').join(',')})`;
           }
           return '1=0'; // Empty array, nothing matches
         case '$nin':
           if (Array.isArray(value) && value.length > 0) {
             // Convert each value to SQLite-compatible type
-            params.push(...value.map(v => toSQLiteValue(v)));
+            params.push(...value.map((v) => toSQLiteValue(v)));
             return `_id NOT IN (${value.map(() => '?').join(',')})`;
           }
           return '1=1'; // Empty array, everything matches
@@ -118,14 +118,14 @@ export class FindCursor<T extends DocumentWithId> {
       case '$in':
         if (Array.isArray(value) && value.length > 0) {
           const conditions = value.map(() => `${jsonPath} = ?`).join(' OR ');
-          params.push(...value.map(v => toSQLiteValue(v)));
+          params.push(...value.map((v) => toSQLiteValue(v)));
           return `(${conditions})`;
         }
         return '1=0'; // Empty array, nothing matches
       case '$nin':
         if (Array.isArray(value) && value.length > 0) {
           const conditions = value.map(() => `${jsonPath} != ?`).join(' AND ');
-          params.push(...value.map(v => toSQLiteValue(v)));
+          params.push(...value.map((v) => toSQLiteValue(v)));
           return `(${conditions})`;
         }
         return '1=1'; // Empty array, everything matches
@@ -239,12 +239,17 @@ export class FindCursor<T extends DocumentWithId> {
           .join(' OR ');
         conditions.push(`NOT (${norConditions})`);
       } else if (key === '$not' && filter.$not) {
-        const notClause = this.buildWhereClause(filter.$not, params);
+        // Create a nested filter with the $not contents
+        const nestedFilter = {
+          [Object.keys(filter.$not)[0]]: filter.$not[Object.keys(filter.$not)[0]],
+        } as Filter<T>;
+        const notClause = this.buildWhereClause(nestedFilter, params);
         conditions.push(`NOT (${notClause})`);
       }
       // Handle text search
       else if (key === '$text' && filter.$text) {
-        const search = filter.$text.$search;
+        const textSearch = filter.$text as import('../types.js').TextSearchOperator;
+        const search = textSearch.$search;
         if (typeof search === 'string' && search.trim() !== '') {
           conditions.push(`data LIKE ?`);
           params.push(`%${search}%`); // Simple LIKE search
