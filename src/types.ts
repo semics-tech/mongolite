@@ -139,3 +139,88 @@ export interface SQLiteRow {
   _id: string;
   data: string; // JSON string
 }
+
+/**
+ * Index specification type.
+ * Specifies fields to index and their sort order (1 for ascending, -1 for descending).
+ */
+export type IndexSpecification = {
+  [key: string]: 1 | -1 | string;
+};
+
+/**
+ * Options for createIndex.
+ */
+export interface CreateIndexOptions {
+  /**
+   * Unique index flag. If true, the index will enforce uniqueness of the indexed field.
+   */
+  unique?: boolean;
+
+  /**
+   * Name of the index. If not specified, a name will be generated.
+   */
+  name?: string;
+
+  /**
+   * If true, create the index in the background and don't block other operations.
+   * In SQLite this might not make a significant difference.
+   */
+  background?: boolean;
+
+  /**
+   * If true, MongoDB will ignore any duplicate values when creating a unique index.
+   * Not directly applicable to SQLite, but retained for API compatibility.
+   */
+  sparse?: boolean;
+}
+
+/**
+ * Result of createIndex operation.
+ */
+export interface CreateIndexResult {
+  /**
+   * Indicates whether the index creation operation was acknowledged.
+   */
+  acknowledged: boolean;
+
+  /**
+   * The name of the created index.
+   */
+  name: string;
+}
+
+/**
+ * Result of dropIndex operation.
+ */
+export interface DropIndexResult {
+  /**
+   * Indicates whether the index deletion operation was acknowledged.
+   */
+  acknowledged: boolean;
+
+  /**
+   * The name of the dropped index.
+   */
+  name: string;
+}
+
+/**
+ * Result of a listIndexes operation.
+ */
+export interface IndexInfo {
+  /**
+   * Name of the index.
+   */
+  name: string;
+
+  /**
+   * The fields this index is defined on.
+   */
+  key: { [key: string]: number };
+
+  /**
+   * Whether this index enforces uniqueness.
+   */
+  unique?: boolean;
+}

@@ -9,8 +9,14 @@ import {
   DeleteResult,
   Projection,
   SQLiteRow,
+  IndexSpecification,
+  CreateIndexOptions,
+  CreateIndexResult,
+  DropIndexResult,
+  IndexInfo,
 } from './types.js';
 import { FindCursor } from './cursors/findCursor.js';
+import { extractRawIndexColumns } from './utils/indexing.js';
 
 /**
  * MongoLiteCollection provides methods to interact with a specific SQLite table
@@ -482,6 +488,187 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       modifiedCount: modifiedCount,
       upsertedId: null, // We don't support upsert yet
     };
+  }
+
+  /**
+   * Creates an index on the specified field(s) of the collection.
+   *
+   * @param fieldOrSpec The field or specification to create the index on.
+   * @param options Options for creating the index.
+   * @returns A promise that resolves to the result of the operation.
+   *
+   * @example
+   * // Create a simple index on the "name" field
+   * collection.createIndex({ name: 1 });
+   *
+   * // Create a unique index on the "email" field
+   * collection.createIndex({ email: 1 }, { unique: true });
+   *
+   * // Create a compound index on multiple fields
+   * collection.createIndex({ name: 1, age: -1 });
+   */
+  async createIndex(
+    fieldOrSpec: string | IndexSpecification,
+    options: CreateIndexOptions = {}
+  ): Promise<CreateIndexResult> {
+    await this.ensureTable();
+
+    // Convert string field to index spec format
+    const spec: IndexSpecification =
+      typeof fieldOrSpec === 'string' ? { [fieldOrSpec]: 1 } : fieldOrSpec;
+
+    // Generate index name if not provided
+    const indexName = options.name || this.generateIndexName(spec);
+
+    // Build the index fields part for SQLite (field1, field2, ...)
+    const indexFields = Object.entries(spec)
+      .map(([field, direction]) => {
+        // For JSON field paths, we need to use json_extract
+        if (field.includes('.') || field !== '_id') {
+          const jsonPath = this.parseJsonPath(field);
+          return `json_extract(data, ${jsonPath}) ${direction === -1 ? 'DESC' : 'ASC'}`;
+        }
+        // For _id field, use the column directly
+        return `_id ${direction === -1 ? 'DESC' : 'ASC'}`;
+      })
+      .join(', ');
+
+    // Create the SQL for the index
+    const uniqueClause = options.unique ? 'UNIQUE' : '';
+    const createIndexSQL = `CREATE ${uniqueClause} INDEX IF NOT EXISTS "${indexName}" ON "${this.name}" (${indexFields})`;
+
+    try {
+      if (this.options.verbose) {
+        console.log(`Creating index ${indexName} on collection ${this.name}`);
+      }
+      await this.db.exec(createIndexSQL);
+      return { acknowledged: true, name: indexName };
+    } catch (error) {
+      console.error(`Error creating index ${indexName} on collection ${this.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate a MongoDB-like index name from an index specification.
+   * Format: collectionName_field1_1_field2_-1
+   */
+  private generateIndexName(spec: IndexSpecification): string {
+    const nameParts = Object.entries(spec).map(
+      ([field, direction]) => `${field.replace(/\./g, '_')}_${direction}`
+    );
+    return `${this.name}_${nameParts.join('_')}`;
+  }
+
+  /**
+   * Lists all indexes on the collection.
+   *
+   * @returns A promise that resolves to an object with a toArray method
+   * that returns the list of indexes.
+   */
+  listIndexes(): { toArray: () => Promise<IndexInfo[]> } {
+    return {
+      toArray: async (): Promise<IndexInfo[]> => {
+        await this.ensureTable();
+
+        try {
+          // Query SQLite master table for indexes on this collection
+          const indexes = await this.db.all<{ name: string; sql: string }>(
+            `SELECT name, sql FROM sqlite_master 
+             WHERE type='index' AND tbl_name=? AND name NOT LIKE 'sqlite_autoindex%'`,
+            [this.name]
+          );
+
+          const results: IndexInfo[] = [];
+
+          // Parse the SQL to determine indexed fields and options
+          for (const index of indexes) {
+            const indexInfo: IndexInfo = {
+              name: index.name,
+              key: {},
+            };
+
+            // Parse the CREATE INDEX statement to extract field information
+            // Example: CREATE UNIQUE INDEX "users_email_1" ON "users" (json_extract(data, '$.email') ASC)
+            const sqlLower = index.sql.toLowerCase();
+            indexInfo.unique = sqlLower.includes('unique index');
+
+            // Extract the fields from the SQL
+            const rawColumns = extractRawIndexColumns(index.sql);
+            for (const col of rawColumns) {
+              // Use the column name as the key, and direction as value
+              indexInfo.key[col.column] = col.direction === 'DESC' ? -1 : 1;
+            }
+            results.push(indexInfo);
+          }
+
+          return results;
+        } catch (error) {
+          console.error(`Error listing indexes for collection ${this.name}:`, error);
+          throw error;
+        }
+      },
+    };
+  }
+
+  /**
+   * Drops a specified index from the collection.
+   *
+   * @param indexName The name of the index to drop.
+   * @returns A promise that resolves to the result of the operation.
+   */
+  async dropIndex(indexName: string): Promise<DropIndexResult> {
+    await this.ensureTable();
+
+    try {
+      if (this.options.verbose) {
+        console.log(`Dropping index ${indexName} from collection ${this.name}`);
+      }
+      await this.db.exec(`DROP INDEX IF EXISTS "${indexName}"`);
+      return { acknowledged: true, name: indexName };
+    } catch (error) {
+      console.error(`Error dropping index ${indexName} from collection ${this.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Drops all indexes from the collection, except for the index on _id.
+   *
+   * @returns A promise that resolves to the result of the operation.
+   */
+  async dropIndexes(): Promise<{ acknowledged: boolean; droppedCount: number }> {
+    await this.ensureTable();
+
+    try {
+      const indexes = await this.listIndexes().toArray();
+      let droppedCount = 0;
+
+      for (const index of indexes) {
+        // Skip primary key index on _id if it exists
+        if (index.name === `sqlite_autoindex_${this.name}_1`) continue;
+
+        await this.db.exec(`DROP INDEX IF EXISTS "${index.name}"`);
+        droppedCount++;
+      }
+
+      return { acknowledged: true, droppedCount };
+    } catch (error) {
+      console.error(`Error dropping indexes from collection ${this.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepends '$.' to the path for SQLite JSON functions.
+   * @private
+   * @param path Field path, e.g., 'address.city'
+   * @returns JSON path string for SQLite, e.g., '$.address.city'
+   */
+  private parseJsonPath(path: string): string {
+    // Prepends '$.' to the path for SQLite JSON functions.
+    // 'address.city' becomes '$.address.city'
+    return `'$.${path}'`;
   }
 
   // Helper for $set, $inc to handle dot notation

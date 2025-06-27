@@ -11,6 +11,7 @@ A MongoDB-like client that uses SQLite as its underlying persistent store. Writt
 * MongoDB-like API (`insertOne`, `findOne`, `updateOne`, `deleteOne`, etc.)
 * SQLite backend for persistence.
 * Automatic `_id` (UUID) generation and indexing.
+* Support for Write Ahead Logging (WAL) mode for better concurrency.
 * Support for querying JSON fields.
 * Written in TypeScript with strong typing.
 * 100% test coverage (aiming for).
@@ -180,16 +181,17 @@ Finds multiple documents matching the filter and returns a cursor.
 
 Updates a single document matching the filter.
 
-* `filter`: The query criteria to select the document.
-* `update`: The update operations to apply. Supports operators like `$set`, `$unset`, `$inc`, `$push`, `$pull`.
-* Returns `UpdateResult`: `{ acknowledged: boolean; matchedCount: number; modifiedCount: number; upsertedId: string | null; }`. (Upsert not yet implemented, `upsertedId` will be `null`).
+* `filter`: The selection criteria for the update.
+* `update`: The modifications to apply. Supports operators like `$set`, `$unset`, `$inc`, `$push`, `$pull`.
+* Returns `UpdateResult`: `{ acknowledged: boolean; matchedCount: number; modifiedCount: number; upsertedId: string | null; }`.
 
 #### `async deleteOne(filter: Filter<T>): Promise<DeleteResult>`
 
 Deletes a single document matching the filter.
 
-* `filter`: The query criteria to select the document.
+* `filter`: The selection criteria for the deletion.
 * Returns `DeleteResult`: `{ acknowledged: boolean; deletedCount: number; }`.
+
 
 ### `FindCursor<T>`
 
@@ -249,6 +251,58 @@ The `update` parameter in `updateOne` supports the following:
 * `{ $pull: { arrayField: valueOrCondition, ... } }`: Removes all instances of a value or values that match a condition from an array.
     * `{ $pull: { scores: 0 } }`
     * `{ $pull: { items: { id: { $in: [1, 2] } } } }` (More complex conditions for $pull might be limited initially)
+#### `async createIndex(fieldOrSpec: string | IndexSpecification, options?: CreateIndexOptions): Promise<CreateIndexResult>`
+
+Creates an index on the specified field(s) of the collection.
+
+* `fieldOrSpec`: Either a string field name or an index specification object (e.g., `{ name: 1, age: -1 }`).
+* `options`: Optional settings for the index creation.
+  * `unique`: If `true`, the index will enforce uniqueness of the indexed field.
+  * `name`: Custom name for the index. If not provided, a name will be generated automatically.
+  * `background`: If `true`, creates the index in the background (in SQLite, this might not have a significant effect).
+  * `sparse`: If `true`, ignores documents that don't have the indexed field (for MongoDB compatibility).
+* Returns `CreateIndexResult`: `{ acknowledged: boolean; name: string; }`.
+
+```typescript
+// Create a simple index on the "name" field
+await usersCollection.createIndex({ name: 1 });
+
+// Create a unique index on the "email" field
+await usersCollection.createIndex({ email: 1 }, { unique: true });
+
+// Create a compound index on multiple fields
+await usersCollection.createIndex({ name: 1, age: -1 });
+
+// You can even create an index on a nested field
+await usersCollection.createIndex({ 'address.city': 1 });
+```
+
+#### `listIndexes(): { toArray: () => Promise<IndexInfo[]> }`
+
+Lists all indexes on the collection.
+
+* Returns an object with a `toArray()` method that resolves to an array of `IndexInfo` objects.
+  * Each `IndexInfo` contains: `name` (string), `key` (object mapping field names to sort direction), and `unique` (boolean).
+
+```typescript
+const indexes = await usersCollection.listIndexes().toArray();
+console.log('Available indexes:', indexes);
+```
+
+#### `async dropIndex(indexName: string): Promise<DropIndexResult>`
+
+Drops a specified index from the collection.
+
+* `indexName`: The name of the index to drop.
+* Returns `DropIndexResult`: `{ acknowledged: boolean; name: string; }`.
+
+#### `async dropIndexes(): Promise<{ acknowledged: boolean; droppedCount: number }>`
+
+Drops all indexes from the collection, except for the index on _id.
+
+* Returns an object with `acknowledged` (boolean) and `droppedCount` (number) indicating how many indexes were dropped.
+````
+
 
 ## Development
 
