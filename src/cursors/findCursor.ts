@@ -528,4 +528,25 @@ export class FindCursor<T extends DocumentWithId> {
       return this.applyProjection(doc);
     });
   }
+
+  /**
+   *  Executes the query and returns the first matching document.
+   *  @returns A promise that resolves to the first matching document or null if no matches are found.
+   *  @throws Error if the query fails.
+   */
+  public async first(): Promise<Partial<T> | null> {
+    const results = await this.limit(1).toArray();
+    return results.length > 0 ? results[0] : null;
+  }
+
+  /**
+   * Executes the query and returns a count of matching documents.
+   * @returns A promise that resolves to the count of matching documents.
+   */
+  public async count(): Promise<number> {
+    const whereClause = this.buildWhereClause({}, []);
+    const countSql = `SELECT COUNT(*) as count FROM "${this.collectionName}" WHERE ${whereClause}`;
+    const result = await this.db.get<{ count: number }>(countSql);
+    return result?.count ?? 0; // Return 0 if result is undefined
+  }
 }
