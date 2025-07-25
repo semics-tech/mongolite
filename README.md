@@ -301,7 +301,54 @@ Drops a specified index from the collection.
 Drops all indexes from the collection, except for the index on _id.
 
 * Returns an object with `acknowledged` (boolean) and `droppedCount` (number) indicating how many indexes were dropped.
-````
+## Performance Benchmarks
+
+*Last updated: 2025-07-25*
+
+### Operation Performance
+
+| Operation | Records Tested | Duration (ms) | Ops/Second | Avg Time/Op (ms) |
+|-----------|----------------|---------------|------------|------------------|
+| INSERT | 10,000 | 48572.42 | 206 | 4.857 |
+| QUERY_SIMPLE | 1,000 | 56.67 | 17646 | 0.057 |
+| QUERY_COMPLEX | 500 | 38.30 | 13054 | 0.077 |
+| QUERY_ARRAY | 500 | 3761.94 | 133 | 7.524 |
+| QUERY_FIND_MANY | 100 | 40.74 | 2454 | 0.407 |
+| UPDATE | 1,000 | 5849.96 | 171 | 5.850 |
+| DELETE | 1,000 | 16064.51 | 62 | 16.065 |
+
+### Storage Capacity
+
+| Records | Database Size (MB) | Avg Record Size (bytes) |
+|---------|-------------------|------------------------|
+| 1,000 | 0.44 | 459 |
+| 10,000 | 4.27 | 448 |
+| 50,000 | 21.36 | 448 |
+| 100,000 | 42.75 | 448 |
+
+### Notes
+
+- **INSERT**: Individual insertOne() operations
+- **QUERY_SIMPLE**: Single field queries with operators
+- **QUERY_COMPLEX**: Multi-field queries with nested objects
+- **QUERY_ARRAY**: Queries searching within arrays
+- **QUERY_FIND_MANY**: Batch queries returning up to 100 records
+- **UPDATE**: Individual updateOne() operations with $set
+- **DELETE**: Individual deleteOne() operations
+
+**Storage Characteristics:**
+- SQLite databases scale well with MongoLite
+- Average record size includes JSON overhead and SQLite indexing
+- Practical limits depend on available disk space and memory
+- WAL mode provides better concurrent access for larger datasets
+
+**Recommendations:**
+- For high-performance scenarios, consider batching operations
+- Use indexing for frequently queried fields
+- Monitor database file size growth with your specific data patterns
+
+## Development
+```
 
 
 ## Development
