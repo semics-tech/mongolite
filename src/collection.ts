@@ -104,14 +104,14 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * */
   async insertMany(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
     await this.ensureTable(); // Ensure table exists before insert
-    
+
     if (docs.length === 0) {
       return [];
     }
 
     const results: InsertOneResult[] = [];
     const batchSize = 500; // Process in batches to avoid memory issues with very large datasets
-    
+
     // Process documents in batches
     for (let i = 0; i < docs.length; i += batchSize) {
       const batch = docs.slice(i, i + batchSize);
@@ -128,7 +128,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   private async insertBatch(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
     const results: InsertOneResult[] = [];
-    
+
     // Prepare all documents and their data upfront
     const preparedDocs = docs.map(doc => {
       const docId = doc._id || new ObjectId().toString();
@@ -143,16 +143,16 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     const insertBatchOperation = async () => {
       // Begin transaction
       await this.db.exec('BEGIN TRANSACTION');
-      
+
       try {
         const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
-        
+
         // Use a prepared statement for better performance
         for (const preparedDoc of preparedDocs) {
           await this.db.run(sql, [preparedDoc.id, preparedDoc.data]);
           results.push({ acknowledged: true, insertedId: preparedDoc.id });
         }
-        
+
         // Commit the transaction
         await this.db.exec('COMMIT');
       } catch (error) {
@@ -162,10 +162,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         } catch (rollbackError) {
           console.error(`Error during rollback in ${this.name}:`, rollbackError);
         }
-        
+
         // Clear results since transaction failed
         results.length = 0;
-        
+
         // Handle specific error types
         if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
           // Find which document caused the constraint violation
@@ -173,7 +173,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
           const duplicateId = preparedDocs.find(doc => errorMessage.includes(doc.id))?.id || 'unknown';
           throw new Error(`Duplicate _id: ${duplicateId}`);
         }
-        
+
         throw error;
       }
     };

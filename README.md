@@ -15,6 +15,7 @@ A MongoDB-like client that uses SQLite as its underlying persistent store. Writt
 * Support for querying JSON fields.
 * Written in TypeScript with strong typing.
 * 100% test coverage (aiming for).
+* **Interactive Query Debugger** - Debug complex queries with `npx mongolite-debug`
 
 ## Installation
 
@@ -111,6 +112,29 @@ async function main() {
 
 main();
 ```
+
+## Query Debugger
+
+MongoLite includes an interactive query debugger to help you debug complex queries and understand how MongoDB-style filters are converted to SQL.
+
+```bash
+# Start the debugger
+npx mongolite-debug
+
+# Use with your specific database
+npx mongolite-debug -d ./path/to/your/database.db
+
+# Start with a specific collection
+npx mongolite-debug -c users --verbose
+```
+
+The debugger provides interactive commands to:
+- Convert find queries to SQL and see the generated queries
+- Execute raw SQL queries for testing
+- Sample data from collections  
+- Compare MongoDB-style queries with optimized SQL
+
+See [DEBUGGER.md](./docs/DEBUGGER.md) for detailed usage instructions and examples.
 
 ## API
 

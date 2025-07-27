@@ -5,6 +5,9 @@
   "main": "dist/index.js",
   "type": "module",
   "types": "dist/index.d.ts",
+  "bin": {
+    "mongolite-debug": "dist/bin/mongolite-debug.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "node --import tsx --test tests/*.test.ts",
@@ -15,7 +18,8 @@
     "verify-build": "node --import tsx scripts/verify-build.js",
     "test-third-party": "node scripts/test-third-party-usage.js",
     "test:all": "npm run lint && npm run test && npm run verify-build && npm run test-third-party",
-    "benchmark": "npx tsx scripts/benchmark.ts"
+    "benchmark": "npx tsx scripts/benchmark.ts",
+    "debug-queries": "npx tsx scripts/query-debugger.ts"
   },
   "repository": {
     "type": "git",
