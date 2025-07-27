@@ -82,7 +82,7 @@ async function main() {
       'database.db',
       'database.sqlite',
       'app.db',
-      'app.sqlite'
+      'app.sqlite',
     ];
 
     // Check if any common database files exist
@@ -120,7 +120,9 @@ async function main() {
 
     if (error instanceof Error && error.message.includes('SQLITE_CANTOPEN')) {
       console.error('');
-      console.error('💡 Tip: Make sure the database file exists or specify a different path with -d');
+      console.error(
+        '💡 Tip: Make sure the database file exists or specify a different path with -d'
+      );
       console.error('   Example: npx mongolite-debug -d ./path/to/your/database.db');
     }
 
@@ -128,7 +130,7 @@ async function main() {
   }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error('Unexpected error:', error);
   process.exit(1);
 });

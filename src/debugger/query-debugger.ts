@@ -24,7 +24,7 @@ export class QueryDebugger {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
-      prompt: 'mongolite-debug> '
+      prompt: 'mongolite-debug> ',
     });
 
     if (options.collection) {
@@ -48,7 +48,10 @@ export class QueryDebugger {
       await this.client.connect();
       console.log('✅ Connected to database.');
     } catch (error) {
-      console.error('❌ Failed to connect to database:', error instanceof Error ? error.message : error);
+      console.error(
+        '❌ Failed to connect to database:',
+        error instanceof Error ? error.message : error
+      );
       throw error;
     }
 
@@ -150,7 +153,7 @@ export class QueryDebugger {
         console.log('No collections found.');
       } else {
         console.log('Collections:');
-        collections.forEach(collection => {
+        collections.forEach((collection) => {
           const marker = collection === this.currentCollection ? ' (current)' : '';
           console.log(`  - ${collection}${marker}`);
         });
@@ -270,7 +273,9 @@ export class QueryDebugger {
       const results = await collection.find({}).limit(count).toArray();
 
       console.log('');
-      console.log(`📋 Sample documents from "${this.currentCollection}" (${results.length} of ${count} requested):`);
+      console.log(
+        `📋 Sample documents from "${this.currentCollection}" (${results.length} of ${count} requested):`
+      );
       if (results.length > 0) {
         results.forEach((doc, index) => {
           console.log(`[${index}]`, JSON.stringify(doc, null, 2));
