@@ -13,6 +13,10 @@ permissions:
 jobs:
   security-audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,9 +42,27 @@ jobs:
       # Create issues for any vulnerabilities that can't be fixed automatically
       - name: Create issues for vulnerabilities
         if: failure()
-        uses: JasonEtco/create-an-issue@v2
+        run: |
+          gh issue create \
+            --title "Security Vulnerability Found in Dependencies" \
+            --label "security,dependencies" \
+            --body "## Security Vulnerabilities
+
+          A security audit has found potential vulnerabilities in the project dependencies.
+
+          ### Action Required
+
+          Please run \`npm audit\` to see the details of the vulnerabilities and then run \`npm audit fix\` to automatically fix issues that don't require major version updates.
+
+          For vulnerabilities that require manual intervention:
+
+          1. Review the vulnerability details
+          2. Update the affected packages manually
+          3. Test thoroughly after updates
+          4. Close this issue once resolved
+
+          ### Vulnerability Details
+
+          Run \`npm audit\` locally for more information about the specific vulnerabilities."
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          filename: .github/ISSUE_TEMPLATE/security-vulnerability.md
-          update_existing: true
+          GH_TOKEN: ${{ github.token }}
