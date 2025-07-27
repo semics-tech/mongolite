@@ -29,6 +29,7 @@ jobs:
       - name: Run npm audit
         run: npm audit
         continue-on-error: true
+        id: audit
 
       # Run npm audit fix if you want to automatically fix vulnerabilities
       # This is optional and might cause breaking changes, so use with caution
@@ -38,7 +39,7 @@ jobs:
 
       # Create issues for any vulnerabilities that can't be fixed automatically
       - name: Create issues for vulnerabilities
-        if: failure()
+        if: steps.audit.outcome == 'failure'
         uses: JasonEtco/create-an-issue@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
