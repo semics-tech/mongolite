@@ -6,6 +6,10 @@ on:
     # Run security audit weekly
     - cron: '0 0 * * 0'
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   security-audit:
     runs-on: ubuntu-latest
