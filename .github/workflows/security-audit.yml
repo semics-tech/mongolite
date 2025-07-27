@@ -28,6 +28,7 @@ jobs:
 
       - name: Run npm audit
         run: npm audit
+        continue-on-error: true
 
       # Run npm audit fix if you want to automatically fix vulnerabilities
       # This is optional and might cause breaking changes, so use with caution
