@@ -98,44 +98,97 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   /**
    * Inserts multiple documents into the collection.
    * If any document does not have an `_id`, a UUID will be generated.
+   * Uses batch insert with transactions for improved performance.
    * @param docs An array of documents to insert.
    * @returns {Promise<InsertOneResult[]>} An array of results for each insert operation.
    * */
   async insertMany(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
     await this.ensureTable(); // Ensure table exists before insert
-    const results: InsertOneResult[] = [];
+    
+    if (docs.length === 0) {
+      return [];
+    }
 
-    for (const doc of docs) {
+    const results: InsertOneResult[] = [];
+    const batchSize = 500; // Process in batches to avoid memory issues with very large datasets
+    
+    // Process documents in batches
+    for (let i = 0; i < docs.length; i += batchSize) {
+      const batch = docs.slice(i, i + batchSize);
+      const batchResults = await this.insertBatch(batch);
+      results.push(...batchResults);
+    }
+
+    return results;
+  }
+
+  /**
+   * Inserts a batch of documents using a single transaction for optimal performance.
+   * @private
+   */
+  private async insertBatch(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
+    const results: InsertOneResult[] = [];
+    
+    // Prepare all documents and their data upfront
+    const preparedDocs = docs.map(doc => {
       const docId = doc._id || new ObjectId().toString();
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { _id, ...dataToStore } = { ...doc, _id: docId }; // Ensure _id is part of the internal structure
+      const { _id, ...dataToStore } = { ...doc, _id: docId };
+      return {
+        id: docId,
+        data: JSON.stringify(dataToStore)
+      };
+    });
 
-      const jsonData = JSON.stringify(dataToStore);
-
-      const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
+    const insertBatchOperation = async () => {
+      // Begin transaction
+      await this.db.exec('BEGIN TRANSACTION');
+      
       try {
-        await this.db.run(sql, [docId, jsonData]);
-        results.push({ acknowledged: true, insertedId: docId });
+        const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
+        
+        // Use a prepared statement for better performance
+        for (const preparedDoc of preparedDocs) {
+          await this.db.run(sql, [preparedDoc.id, preparedDoc.data]);
+          results.push({ acknowledged: true, insertedId: preparedDoc.id });
+        }
+        
+        // Commit the transaction
+        await this.db.exec('COMMIT');
       } catch (error) {
-        console.error(`Error inserting document into ${this.name}:`, error);
+        // Rollback on any error
+        try {
+          await this.db.exec('ROLLBACK');
+        } catch (rollbackError) {
+          console.error(`Error during rollback in ${this.name}:`, rollbackError);
+        }
+        
+        // Clear results since transaction failed
+        results.length = 0;
+        
+        // Handle specific error types
         if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
-          throw new Error(`Duplicate _id: ${docId}`);
+          // Find which document caused the constraint violation
+          const errorMessage = (error as Error).message;
+          const duplicateId = preparedDocs.find(doc => errorMessage.includes(doc.id))?.id || 'unknown';
+          throw new Error(`Duplicate _id: ${duplicateId}`);
         }
-        if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
-          // If we get a SQLITE_BUSY during bulk insert, retry just this one document
-          try {
-            const result = await this.retryWithBackoff(async () => {
-              await this.db.run(sql, [docId, jsonData]);
-              return { acknowledged: true, insertedId: docId };
-            }, `insert for ${docId} during bulk operation`);
-            results.push(result);
-            continue; // Skip to next document
-          } catch (retryError) {
-            // If retry also fails, throw the original error
-            throw error;
-          }
-        }
-        throw error; // Re-throw other errors
+        
+        throw error;
+      }
+    };
+
+    try {
+      await insertBatchOperation();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
+        // Retry the entire batch with backoff
+        await this.retryWithBackoff(
+          insertBatchOperation,
+          `batch insert of ${docs.length} documents`
+        );
+      } else {
+        throw error;
       }
     }
 
