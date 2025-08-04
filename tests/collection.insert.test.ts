@@ -187,4 +187,65 @@ describe('MongoLiteCollection - Insert Operations', () => {
       assert.strictEqual(docs.length, 0);
     });
   });
+
+  describe('JSON Safety and Validation', () => {
+    it('should validate documents before insertion', async () => {
+      const invalidDoc = {
+        name: 'test',
+        value: 100,
+        invalidFunction: () => 'not allowed',
+      } as unknown as TestDoc;
+
+      try {
+        await collection.insertOne(invalidDoc);
+        assert.fail('Should have rejected document with function');
+      } catch (error) {
+        assert.ok(error instanceof Error);
+        assert.ok(error.message.includes('Functions are not allowed'));
+      }
+    });
+
+    it('should safely stringify complex valid documents', async () => {
+      const complexDoc = {
+        name: 'complex',
+        value: 100,
+        nested: {
+          array: [1, 2, { deep: 'value' }],
+          date: new Date(),
+          boolean: true,
+          nullValue: null,
+        },
+      };
+
+      const result = await collection.insertOne(complexDoc);
+      assert.strictEqual(result.acknowledged, true);
+
+      const retrieved = await collection.findOne({ _id: result.insertedId });
+      assert.ok(retrieved);
+      assert.strictEqual(retrieved.name, 'complex');
+      assert.strictEqual(retrieved.value, 100);
+      assert.ok(retrieved.nested);
+    });
+
+    it('should handle Date objects correctly in documents', async () => {
+      const testDate = new Date('2023-01-01T00:00:00.000Z');
+      const docWithDate = {
+        name: 'dateTest',
+        value: 100,
+        createdAt: testDate,
+        metadata: {
+          lastModified: testDate,
+        },
+      };
+
+      const result = await collection.insertOne(docWithDate);
+      assert.strictEqual(result.acknowledged, true);
+
+      const retrieved = await collection.findOne({ _id: result.insertedId });
+      assert.ok(retrieved);
+      assert.strictEqual(retrieved.name, 'dateTest');
+      assert.ok(retrieved.createdAt instanceof Date);
+      assert.strictEqual(retrieved.createdAt.toISOString(), testDate.toISOString());
+    });
+  });
 });

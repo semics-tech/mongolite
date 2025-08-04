@@ -16,6 +16,48 @@ A MongoDB-like client that uses SQLite as its underlying persistent store. Writt
 * Written in TypeScript with strong typing.
 * 100% test coverage (aiming for).
 * **Interactive Query Debugger** - Debug complex queries with `npx mongolite-debug`
+* **JSON Safety & Data Integrity** - Comprehensive protection against malformed JSON and data corruption
+
+## JSON Safety & Data Integrity
+
+MongoLite includes robust safeguards to prevent and handle malformed JSON data that could cause application failures or data corruption:
+
+### Document Validation
+- **Pre-storage validation**: Automatically validates documents before insertion to prevent storing invalid data
+- **Type safety**: Rejects non-JSON-serializable data (functions, symbols, BigInt, RegExp, circular references)
+- **Round-trip verification**: Ensures all data can be safely stored and retrieved
+
+### Malformed JSON Recovery
+- **Graceful degradation**: Handles corrupted JSON data without crashing your application
+- **Automatic recovery**: Attempts to fix common JSON corruption issues (escaped quotes, backslashes)
+- **Fallback objects**: Returns special marker objects for unrecoverable data with debugging information
+- **Error logging**: Detailed logging for debugging and monitoring data integrity issues
+
+### Example Usage
+
+```typescript
+// Document validation prevents invalid data
+try {
+  await collection.insertOne({
+    name: 'user',
+    invalidFunction: () => 'not allowed' // This will be rejected
+  });
+} catch (error) {
+  console.log('Validation error:', error.message);
+  // "Cannot insert document: Document validation failed: Functions are not allowed in documents"
+}
+
+// Corrupted data recovery
+const doc = await collection.findOne({ _id: 'some-id' });
+if (doc && '__mongoLiteCorrupted' in doc) {
+  console.log('Found corrupted document');
+  console.log('Original data:', doc.__originalData);
+  console.log('Error details:', doc.__error);
+  // Handle corruption appropriately
+}
+```
+
+For detailed information about JSON safety features, see [JSON_SAFETY.md](./docs/JSON_SAFETY.md).
 
 ## Installation
 

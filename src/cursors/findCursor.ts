@@ -2,6 +2,59 @@ import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../
 import { SQLiteDB } from '../db.js';
 
 /**
+ * Safely parses JSON data with fallback mechanisms for malformed JSON.
+ * @param jsonString The JSON string to parse
+ * @param context Optional context for error messages and recovery
+ * @returns The parsed object or a fallback object
+ */
+function safeJsonParse(jsonString: string, context?: string): unknown {
+  if (!jsonString || typeof jsonString !== 'string') {
+    console.warn(`Invalid JSON string${context ? ` in ${context}` : ''}: not a string or empty`);
+    return {};
+  }
+
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    // Log the error for debugging
+    console.error(
+      `JSON parse error${context ? ` in ${context}` : ''}: ${error instanceof Error ? error.message : 'Unknown error'}`
+    );
+    console.error(
+      `Malformed JSON string: ${jsonString.substring(0, 500)}${jsonString.length > 500 ? '...' : ''}`
+    );
+
+    // Attempt to recover from common JSON corruption issues
+    try {
+      // Try to fix common escaping issues
+      let fixedJson = jsonString;
+
+      // Fix double-escaped quotes
+      fixedJson = fixedJson.replace(/\\"/g, '"');
+
+      // Fix improperly escaped backslashes
+      fixedJson = fixedJson.replace(/\\\\/g, '\\');
+
+      // Try parsing the fixed JSON
+      const recovered = JSON.parse(fixedJson);
+      console.warn(`Successfully recovered malformed JSON${context ? ` in ${context}` : ''}`);
+      return recovered;
+    } catch (recoveryError) {
+      console.error(
+        `JSON recovery failed${context ? ` in ${context}` : ''}: ${recoveryError instanceof Error ? recoveryError.message : 'Unknown error'}`
+      );
+
+      // Last resort: return an empty object with a special marker
+      return {
+        __mongoLiteCorrupted: true,
+        __originalData: jsonString,
+        __error: error instanceof Error ? error.message : 'Unknown JSON parse error',
+      };
+    }
+  }
+}
+
+/**
  * Helper function to convert JavaScript values to SQLite-compatible values.
  * This ensures that boolean values are converted to 0/1 integers that SQLite can handle.
  * Date objects are converted to ISO strings for SQLite storage and comparison.
@@ -579,7 +632,7 @@ export class FindCursor<T extends DocumentWithId> {
     // Handle malformed json in the database
     const rows = await this.db.all<SQLiteRow>(finalSql, finalParams);
     return rows.map((row) => {
-      const parsedData = JSON.parse(row.data);
+      const parsedData = safeJsonParse(row.data, `findCursor toArray for document ${row._id}`);
       const restoredData = restoreDates(parsedData) as Record<string, unknown>;
       const doc = { _id: row._id, ...restoredData } as T;
       return this.applyProjection(doc);

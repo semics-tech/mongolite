@@ -19,6 +19,170 @@ import { FindCursor } from './cursors/findCursor.js';
 import { extractRawIndexColumns } from './utils/indexing.js';
 
 /**
+ * Safely stringifies JSON data with validation and error handling.
+ * Prevents storing malformed JSON that could cause parsing issues later.
+ * @param data The data to stringify
+ * @param context Optional context for error messages
+ * @returns The JSON string
+ * @throws Error if the data cannot be safely stringified
+ */
+function safeJsonStringify(data: unknown, context?: string): string {
+  try {
+    // First, validate that the data is JSON-serializable by attempting to stringify it
+    const jsonString = JSON.stringify(data);
+
+    // Verify that the stringified data can be parsed back (round-trip test)
+    try {
+      const parsed = JSON.parse(jsonString);
+      // Basic validation that the round-trip preserved the data structure
+      if (typeof data === 'object' && data !== null && typeof parsed !== 'object') {
+        throw new Error('Round-trip JSON validation failed: type mismatch');
+      }
+    } catch (parseError) {
+      throw new Error(
+        `Round-trip JSON validation failed: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`
+      );
+    }
+
+    return jsonString;
+  } catch (error) {
+    const contextMsg = context ? ` in ${context}` : '';
+    if (error instanceof Error) {
+      throw new Error(`Failed to safely stringify JSON data${contextMsg}: ${error.message}`);
+    }
+    throw new Error(`Failed to safely stringify JSON data${contextMsg}: Unknown error`);
+  }
+}
+
+/**
+ * Safely parses JSON data with fallback mechanisms for malformed JSON.
+ * @param jsonString The JSON string to parse
+ * @param context Optional context for error messages and recovery
+ * @returns The parsed object or a fallback object
+ */
+function safeJsonParse(jsonString: string, context?: string): unknown {
+  if (!jsonString || typeof jsonString !== 'string') {
+    console.warn(`Invalid JSON string${context ? ` in ${context}` : ''}: not a string or empty`);
+    return {};
+  }
+
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    // Log the error for debugging
+    console.error(
+      `JSON parse error${context ? ` in ${context}` : ''}: ${error instanceof Error ? error.message : 'Unknown error'}`
+    );
+    console.error(
+      `Malformed JSON string: ${jsonString.substring(0, 500)}${jsonString.length > 500 ? '...' : ''}`
+    );
+
+    // Attempt to recover from common JSON corruption issues
+    try {
+      // Try to fix common escaping issues
+      let fixedJson = jsonString;
+
+      // Fix double-escaped quotes
+      fixedJson = fixedJson.replace(/\\"/g, '"');
+
+      // Fix improperly escaped backslashes
+      fixedJson = fixedJson.replace(/\\\\/g, '\\');
+
+      // Try parsing the fixed JSON
+      const recovered = JSON.parse(fixedJson);
+      console.warn(`Successfully recovered malformed JSON${context ? ` in ${context}` : ''}`);
+      return recovered;
+    } catch (recoveryError) {
+      console.error(
+        `JSON recovery failed${context ? ` in ${context}` : ''}: ${recoveryError instanceof Error ? recoveryError.message : 'Unknown error'}`
+      );
+
+      // Last resort: return an empty object with a special marker
+      return {
+        __mongoLiteCorrupted: true,
+        __originalData: jsonString,
+        __error: error instanceof Error ? error.message : 'Unknown JSON parse error',
+      };
+    }
+  }
+}
+
+/**
+ * Validates that a document is safe to store (no functions, circular references, etc.)
+ * @param doc The document to validate
+ * @param path Current path for error reporting
+ * @throws Error if the document contains invalid data
+ */
+function validateDocumentForStorage(doc: unknown, path = 'root'): void {
+  if (doc === null || doc === undefined) {
+    return;
+  }
+
+  if (typeof doc === 'function') {
+    throw new Error(
+      `Document validation failed: Functions are not allowed in documents (found at ${path})`
+    );
+  }
+
+  if (typeof doc === 'symbol') {
+    throw new Error(
+      `Document validation failed: Symbols are not allowed in documents (found at ${path})`
+    );
+  }
+
+  if (typeof doc === 'bigint') {
+    throw new Error(
+      `Document validation failed: BigInt values are not supported, use regular numbers or strings (found at ${path})`
+    );
+  }
+
+  if (doc instanceof RegExp) {
+    throw new Error(
+      `Document validation failed: RegExp objects are not supported in documents (found at ${path})`
+    );
+  }
+
+  if (Array.isArray(doc)) {
+    doc.forEach((item, index) => {
+      validateDocumentForStorage(item, `${path}[${index}]`);
+    });
+  } else if (typeof doc === 'object') {
+    // Check for circular references by maintaining a Set of visited objects
+    const visited = new Set();
+
+    function checkCircular(obj: object, currentPath: string): void {
+      if (visited.has(obj)) {
+        throw new Error(
+          `Document validation failed: Circular reference detected at ${currentPath}`
+        );
+      }
+      visited.add(obj);
+
+      for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'object' && value !== null) {
+          checkCircular(value, `${currentPath}.${key}`);
+        }
+      }
+
+      visited.delete(obj);
+    }
+
+    try {
+      checkCircular(doc, path);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Circular reference')) {
+        throw error;
+      }
+    }
+
+    // Validate each property
+    for (const [key, value] of Object.entries(doc)) {
+      validateDocumentForStorage(value, `${path}.${key}`);
+    }
+  }
+}
+
+/**
  * MongoLiteCollection provides methods to interact with a specific SQLite table
  * as if it were a MongoDB collection.
  */
@@ -74,7 +238,16 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { _id, ...dataToStore } = { ...doc, _id: docId }; // Ensure _id is part of the internal structure
 
-    const jsonData = JSON.stringify(dataToStore);
+    // Validate the document before storing
+    try {
+      validateDocumentForStorage(dataToStore);
+    } catch (error) {
+      throw new Error(
+        `Cannot insert document: ${error instanceof Error ? error.message : 'Unknown validation error'}`
+      );
+    }
+
+    const jsonData = safeJsonStringify(dataToStore, `insertOne for document ${docId}`);
 
     const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
     try {
@@ -126,17 +299,29 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * Inserts a batch of documents using a single transaction for optimal performance.
    * @private
    */
-  private async insertBatch(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
+  private async insertBatch(
+    docs: (Omit<T, '_id'> & { _id?: string })[]
+  ): Promise<InsertOneResult[]> {
     const results: InsertOneResult[] = [];
 
     // Prepare all documents and their data upfront
-    const preparedDocs = docs.map(doc => {
+    const preparedDocs = docs.map((doc) => {
       const docId = doc._id || new ObjectId().toString();
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { _id, ...dataToStore } = { ...doc, _id: docId };
+
+      // Validate the document before storing
+      try {
+        validateDocumentForStorage(dataToStore);
+      } catch (error) {
+        throw new Error(
+          `Cannot insert document ${docId}: ${error instanceof Error ? error.message : 'Unknown validation error'}`
+        );
+      }
+
       return {
         id: docId,
-        data: JSON.stringify(dataToStore)
+        data: safeJsonStringify(dataToStore, `insertBatch for document ${docId}`),
       };
     });
 
@@ -170,7 +355,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         if ((error as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT') {
           // Find which document caused the constraint violation
           const errorMessage = (error as Error).message;
-          const duplicateId = preparedDocs.find(doc => errorMessage.includes(doc.id))?.id || 'unknown';
+          const duplicateId =
+            preparedDocs.find((doc) => errorMessage.includes(doc.id))?.id || 'unknown';
           throw new Error(`Duplicate _id: ${duplicateId}`);
         }
 
@@ -259,7 +445,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       const newDocId = update.$set?._id || new ObjectId().toString();
       const newDoc = { _id: newDocId, ...update.$set } as T; // Assuming $set is used for upsert
       // Ensure _id is set
-      const jsonData = JSON.stringify(newDoc);
+      const jsonData = safeJsonStringify(newDoc, `upsert for document ${newDocId}`);
       const insertSql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
       try {
         await this.db.run(insertSql, [newDocId, jsonData]);
@@ -281,7 +467,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
     }
 
-    const currentDoc = JSON.parse(rowToUpdate.data);
+    const currentDoc = safeJsonParse(rowToUpdate.data, `updateOne for document ${rowToUpdate._id}`);
     let modified = false;
 
     // Process update operators
@@ -376,7 +562,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     if (modified) {
       // Update the document in SQLite
       const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
-      const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
+      const updateParams = [
+        safeJsonStringify(currentDoc, `updateOne for document ${rowToUpdate._id}`),
+        rowToUpdate._id,
+      ];
 
       try {
         await this.db.run(updateSql, updateParams);
@@ -428,7 +617,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     let modifiedCount = 0;
     const updatedIds: string[] = [];
     for (const rowToUpdate of rowsToUpdate) {
-      const currentDoc = JSON.parse(rowToUpdate.data);
+      const currentDoc = safeJsonParse(
+        rowToUpdate.data,
+        `updateMany for document ${rowToUpdate._id}`
+      );
       let modified = false;
       // Process update operators
       for (const operator in update) {
@@ -517,7 +709,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       if (modified) {
         // Update the document in SQLite
         const updateSql = `UPDATE "${this.name}" SET data = ? WHERE _id = ?`;
-        const updateParams = [JSON.stringify(currentDoc), rowToUpdate._id];
+        const updateParams = [
+          safeJsonStringify(currentDoc, `updateMany for document ${rowToUpdate._id}`),
+          rowToUpdate._id,
+        ];
         try {
           await this.db.run(updateSql, updateParams);
           modifiedCount++;

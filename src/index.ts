@@ -27,11 +27,19 @@ export class MongoLite {
   }
 
   /**
-   * Connects to the database.
-   * Note: Most operations will auto-connect if needed.
+   * Connects to the SQLite database.
+   * @returns {Promise<void>} A promise that resolves when connected.
    */
   async connect(): Promise<void> {
     return this.db.connect();
+  }
+
+  /**
+   * Get the underlying SQLiteDB instance for advanced operations or testing.
+   * @returns {SQLiteDB} The SQLiteDB instance.
+   */
+  get database(): SQLiteDB {
+    return this.db;
   }
 
   /**
