@@ -4,6 +4,7 @@ import { SQLiteDB } from '../db.js';
 /**
  * Helper function to convert JavaScript values to SQLite-compatible values.
  * This ensures that boolean values are converted to 0/1 integers that SQLite can handle.
+ * Date objects are converted to ISO strings for SQLite storage and comparison.
  * @param value The value to convert
  * @returns A SQLite-compatible value
  */
@@ -11,7 +12,49 @@ function toSQLiteValue(value: unknown): unknown {
   if (typeof value === 'boolean') {
     return value ? 1 : 0;
   }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
   return value;
+}
+
+/**
+ * Helper function to recursively restore Date objects from JSON-parsed data.
+ * Converts ISO date strings back to Date objects.
+ * @param obj The object to process
+ * @returns The object with Date strings converted back to Date objects
+ */
+function restoreDates(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (typeof obj === 'string') {
+    // Check if string is an ISO date string
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+    if (isoDateRegex.test(obj)) {
+      const date = new Date(obj);
+      // Verify it's a valid date and the string represents the same date
+      if (!isNaN(date.getTime()) && date.toISOString() === obj) {
+        return date;
+      }
+    }
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => restoreDates(item));
+  }
+
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = restoreDates(value);
+    }
+    return result;
+  }
+
+  return obj;
 }
 
 /**
@@ -89,6 +132,12 @@ export class FindCursor<T extends DocumentWithId> {
       case '$eq':
         if (value === null) {
           return `${jsonPath} IS NULL`;
+        }
+
+        // Handle Date objects with exact equality
+        if (value instanceof Date) {
+          params.push(toSQLiteValue(value));
+          return `${jsonPath} = ?`;
         }
 
         // Handle string matching for equality and array matching as par mongodb client
@@ -286,7 +335,12 @@ export class FindCursor<T extends DocumentWithId> {
           }
         } else {
           // Regular field with JSON path
-          if (typeof value === 'object' && value !== null) {
+          if (value instanceof Date) {
+            // Handle Date objects for simple equality
+            const jsonPath = this.parseJsonPath(key);
+            conditions.push(`json_extract(data, ${jsonPath}) = ?`);
+            params.push(toSQLiteValue(value));
+          } else if (typeof value === 'object' && value !== null) {
             // Check if any key is an operator
             const hasOperators = Object.keys(value).some((k) => k.startsWith('$'));
 
@@ -522,9 +576,12 @@ export class FindCursor<T extends DocumentWithId> {
       finalParams.push(this.skipCount);
     }
 
+    // Handle malformed json in the database
     const rows = await this.db.all<SQLiteRow>(finalSql, finalParams);
     return rows.map((row) => {
-      const doc = { _id: row._id, ...JSON.parse(row.data) } as T;
+      const parsedData = JSON.parse(row.data);
+      const restoredData = restoreDates(parsedData) as Record<string, unknown>;
+      const doc = { _id: row._id, ...restoredData } as T;
       return this.applyProjection(doc);
     });
   }
