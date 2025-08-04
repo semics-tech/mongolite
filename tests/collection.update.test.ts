@@ -9,6 +9,16 @@ interface TestDoc extends DocumentWithId {
   value: number;
   tags?: string[];
   nested?: { subValue: string };
+  category?: string;
+  updated?: boolean;
+  created?: boolean;
+  auto?: boolean;
+  matched?: boolean;
+  numbers?: number[];
+  objects?: { key: string }[];
+  otherNested?: { deep: { field: string } };
+  categoryUpdated?: boolean;
+  extra?: string;
 }
 
 describe('MongoLiteCollection - Update Operations', () => {
@@ -205,7 +215,7 @@ describe('MongoLiteCollection - Update Operations', () => {
     });
 
     it('should update all documents when filter is empty', async () => {
-      const result = await collection.updateMany({}, { $set: { updated: true } as any });
+      const result = await collection.updateMany({}, { $set: { updated: true } });
 
       assert.strictEqual(result.acknowledged, true);
       assert.strictEqual(result.matchedCount, 5); // All 5 test documents
@@ -214,7 +224,7 @@ describe('MongoLiteCollection - Update Operations', () => {
       // Verify all documents were updated
       const allDocs = await collection.find({}).toArray();
       assert.strictEqual(allDocs.length, 5);
-      assert.ok(allDocs.every((d) => (d as any).updated === true));
+      assert.ok(allDocs.every((d) => d.updated === true));
     });
 
     it('should increment values for multiple documents', async () => {
@@ -254,7 +264,7 @@ describe('MongoLiteCollection - Update Operations', () => {
       const result = await collection.updateMany(
         { tags: { $exists: true } }, // docs with tags field
         {
-          $set: { categoryUpdated: true } as any,
+          $set: { categoryUpdated: true },
           $inc: { value: -5 },
           $unset: { tags: '' },
         }
@@ -301,7 +311,7 @@ describe('MongoLiteCollection - Update Operations', () => {
       assert.strictEqual(updatedDoc?._id, '1');
       assert.strictEqual(updatedDoc?.name, 'completelyNew');
       assert.strictEqual(updatedDoc?.value, 999);
-      assert.strictEqual((updatedDoc as any).extra, 'new field');
+      assert.strictEqual(updatedDoc?.extra, 'new field');
     });
 
     it('should update a document by query criteria', async () => {
@@ -436,6 +446,302 @@ describe('MongoLiteCollection - Update Operations', () => {
       assert.strictEqual(upsertedDoc?._id, validObjectId);
       assert.strictEqual(upsertedDoc?.name, 'validObjectIdUpsert');
       assert.strictEqual(upsertedDoc?.value, 500);
+    });
+
+    it('should update existing document when upsert is true but document exists', async () => {
+      // Use an existing document ID
+      const result = await collection.updateOne(
+        { _id: '1' },
+        { $set: { name: 'upsertUpdateExisting', value: 999 } },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 1);
+      assert.strictEqual(result.modifiedCount, 1);
+      assert.strictEqual(result.upsertedId, null); // No upsert occurred
+
+      // Verify document was updated, not inserted
+      const updatedDoc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(updatedDoc?.name, 'upsertUpdateExisting');
+      assert.strictEqual(updatedDoc?.value, 999);
+    });
+
+    it('should create new document with complex query filter when upsert is true', async () => {
+      const result = await collection.updateOne(
+        { name: 'nonexistentName', value: { $gt: 1000 } },
+        { $set: { name: 'complexQueryUpsert', value: 1500, tags: ['complex'] } },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(result.upsertedId !== null);
+
+      // Verify document was created
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, 'complexQueryUpsert');
+      assert.strictEqual(upsertedDoc?.value, 1500);
+      assert.deepStrictEqual(upsertedDoc?.tags, ['complex']);
+    });
+
+    // TODO Implement
+    it.skip('should handle upsert with multiple update operators', async () => {
+      const result = await collection.updateOne(
+        { _id: 'multiOpUpsert' },
+        {
+          $set: { _id: 'multiOpUpsert', name: 'multiOperatorUpsert', category: 'test' },
+          $inc: { value: 50 }, // Should set to 50 since doc doesn't exist
+        },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.strictEqual(result.upsertedId, 'multiOpUpsert');
+
+      // Verify document was created with all operators applied
+      const upsertedDoc = await collection.findOne({ _id: 'multiOpUpsert' });
+      assert.strictEqual(upsertedDoc?.name, 'multiOperatorUpsert');
+      assert.strictEqual(upsertedDoc?.category, 'test');
+      assert.strictEqual(upsertedDoc?.value, 50); // $inc on non-existent field
+    });
+
+    // TODO Implement
+    it.skip('should handle upsert with $unset operator (should be ignored for new document)', async () => {
+      const result = await collection.updateOne(
+        { _id: 'unsetUpsert' },
+        {
+          $set: { name: 'unsetTest', value: 100 },
+          $unset: { nonExistentField: '' }, // Should be ignored
+        },
+        { upsert: true }
+      );
+
+      if (!result.upsertedId) {
+        throw new Error('upsertedId should not be null for upsert operation');
+      }
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(
+        ObjectId.isValid(result.upsertedId),
+        'upsertedId should be a valid ObjectId string'
+      );
+
+      // Verify document was created correctly
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, 'unsetTest');
+      assert.strictEqual(upsertedDoc?.value, 100);
+    });
+
+    // TODO Implement nested updates
+    it.skip('should handle upsert with nested field updates', async () => {
+      const result = await collection.updateOne(
+        { _id: 'nestedUpsert' },
+        {
+          $set: {
+            'nested.field1': 'value1',
+            'nested.field2': 'value2',
+            'otherNested.deep.field': 'deepValue',
+          },
+        },
+        { upsert: true }
+      );
+
+      if (!result.upsertedId) {
+        throw new Error('upsertedId should not be null for upsert operation');
+      }
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(
+        ObjectId.isValid(result.upsertedId),
+        'upsertedId should be a valid ObjectId string'
+      );
+
+      // Verify nested structure was created correctly
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.deepStrictEqual(upsertedDoc?.nested, {
+        field1: 'value1',
+        field2: 'value2',
+      });
+      assert.deepStrictEqual(upsertedDoc?.otherNested, {
+        deep: { field: 'deepValue' },
+      });
+    });
+
+    it('should handle upsert with array field initialization', async () => {
+      const result = await collection.updateOne(
+        { _id: 'arrayUpsert' },
+        {
+          $set: {
+            name: 'arrayTest',
+            tags: ['tag1', 'tag2', 'tag3'],
+            numbers: [1, 2, 3, 4],
+            objects: [{ key: 'value1' }, { key: 'value2' }],
+          },
+        },
+        { upsert: true }
+      );
+
+      if (!result.upsertedId) {
+        throw new Error('upsertedId should not be null for upsert operation');
+      }
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(
+        ObjectId.isValid(result.upsertedId),
+        'upsertedId should be a valid ObjectId string'
+      );
+
+      // Verify arrays were created correctly
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, 'arrayTest');
+      assert.deepStrictEqual(upsertedDoc?.tags, ['tag1', 'tag2', 'tag3']);
+      assert.deepStrictEqual(upsertedDoc?.numbers, [1, 2, 3, 4]);
+      assert.deepStrictEqual(upsertedDoc?.objects, [{ key: 'value1' }, { key: 'value2' }]);
+    });
+
+    it('should handle upsert when filter contains non-_id fields', async () => {
+      const result = await collection.updateOne(
+        { name: 'filterUpsert', category: 'special' },
+        {
+          $set: {
+            name: 'filterUpsert',
+            category: 'special',
+            value: 777,
+            created: true,
+          },
+        },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(result.upsertedId !== null);
+
+      // Verify document includes filter fields and update fields
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, 'filterUpsert');
+      assert.strictEqual(upsertedDoc?.category, 'special');
+      assert.strictEqual(upsertedDoc?.value, 777);
+      assert.strictEqual(upsertedDoc?.created, true);
+    });
+
+    it('should generate new ObjectId when no _id is specified in filter or update', async () => {
+      const result = await collection.updateOne(
+        { name: 'autoIdUpsert' },
+        { $set: { value: 555, auto: true } },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(result.upsertedId !== null);
+      assert.ok(typeof result.upsertedId === 'string');
+      assert.ok(
+        ObjectId.isValid(result.upsertedId),
+        'upsertedId should be a valid ObjectId string'
+      );
+
+      // Verify the generated ID is a valid ObjectId format
+      assert.ok(ObjectId.isValid(result.upsertedId));
+
+      // Verify document was created with auto-generated ID
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, undefined);
+      assert.strictEqual(upsertedDoc?.value, 555);
+      assert.strictEqual(upsertedDoc?.auto, true);
+    });
+
+    it('should handle upsert with empty update object', async () => {
+      const result = await collection.updateOne(
+        { _id: 'emptyUpdate' },
+        { $set: {} },
+        { upsert: true }
+      );
+
+      if (!result.upsertedId) {
+        throw new Error('upsertedId should not be null for upsert operation');
+      }
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(
+        ObjectId.isValid(result.upsertedId),
+        'upsertedId should be a valid ObjectId string'
+      );
+
+      // Verify document was created with just the _id
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?._id, result.upsertedId);
+      assert.strictEqual(Object.keys(upsertedDoc || {}).length, 1); // Only _id field
+    });
+
+    it('should handle upsert with filter containing operators', async () => {
+      const result = await collection.updateOne(
+        { value: { $gte: 2000 }, name: 'specialOperator' },
+        {
+          $set: {
+            name: 'specialOperatorUpsert',
+            value: 2500,
+            matched: true,
+          },
+        },
+        { upsert: true }
+      );
+
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+      assert.ok(result.upsertedId !== null);
+
+      // Verify document was created (filter operators are ignored for upsert document creation)
+      const upsertedDoc = await collection.findOne({ _id: result.upsertedId });
+      assert.strictEqual(upsertedDoc?.name, 'specialOperatorUpsert');
+      assert.strictEqual(upsertedDoc?.value, 2500);
+      assert.strictEqual(upsertedDoc?.matched, true);
+    });
+
+    it('should not upsert when upsert option is false or not provided', async () => {
+      // Test with explicit false
+      const result1 = await collection.updateOne(
+        { _id: 'noUpsert1' },
+        { $set: { name: 'shouldNotCreate' } },
+        { upsert: false }
+      );
+
+      assert.strictEqual(result1.acknowledged, true);
+      assert.strictEqual(result1.matchedCount, 0);
+      assert.strictEqual(result1.modifiedCount, 0);
+      assert.strictEqual(result1.upsertedId, null);
+
+      // Test without upsert option (default false)
+      const result2 = await collection.updateOne(
+        { _id: 'noUpsert2' },
+        { $set: { name: 'shouldNotCreate' } }
+      );
+
+      assert.strictEqual(result2.acknowledged, true);
+      assert.strictEqual(result2.matchedCount, 0);
+      assert.strictEqual(result2.modifiedCount, 0);
+      assert.strictEqual(result2.upsertedId, null);
+
+      // Verify no documents were created
+      const doc1 = await collection.findOne({ _id: 'noUpsert1' });
+      const doc2 = await collection.findOne({ _id: 'noUpsert2' });
+      assert.strictEqual(doc1, null);
+      assert.strictEqual(doc2, null);
     });
   });
 });
