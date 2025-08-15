@@ -3,6 +3,32 @@ import assert from 'node:assert';
 import { MongoLite } from '../src/index';
 import { MongoLiteCollection, DocumentWithId } from '../src/index'; // Assuming DocumentWithId is exported
 
+/**
+ * 
+ * EXAMPLE NOT WORKING
+ * {
+  cohorts: {
+    $all: [
+      {
+        CohortCode: "RTTPTL01",
+      },
+      {
+        CohortCode: "RTTPTL02",
+      },
+      {
+        CohortCode: "RTTPTL03",
+      },
+      {
+        CohortCode: "ERSASI01",
+      },
+    ],
+  },
+  ClientCode: "mbi-dev-ollie",
+  hierarchyLevel: {
+    $gt: 0,
+  },
+}
+ */
 interface TestDoc extends DocumentWithId {
   name: string;
   value: number | null; // Allow null for testing
