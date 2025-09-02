@@ -4,6 +4,12 @@ import { DocumentWithId } from './types.js';
 
 export { MongoLiteCollection } from './collection.js';
 export * from './types.js';
+export { ChangeStream } from './changeStream.js';
+export type {
+  ChangeStreamDocument,
+  ChangeStreamOptions,
+  ChangeOperationType,
+} from './changeStream.js';
 
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 

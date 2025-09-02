@@ -17,6 +17,7 @@ import {
 } from './types.js';
 import { FindCursor } from './cursors/findCursor.js';
 import { extractRawIndexColumns } from './utils/indexing.js';
+import { ChangeStream, ChangeStreamOptions } from './changeStream.js';
 
 /**
  * Safely stringifies JSON data with validation and error handling.
@@ -1073,6 +1074,34 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     const result = await this.db.get<{ count: number }>(countSql, paramsForCount);
     return result?.count || 0;
+  }
+
+  /**
+   * Opens a change stream to watch for changes on this collection.
+   * Returns a ChangeStream that emits events when documents are inserted, updated, or deleted.
+   *
+   * @param options Options for the change stream
+   * @returns A ChangeStream instance
+   *
+   * @example
+   * ```typescript
+   * const changeStream = collection.watch();
+   *
+   * changeStream.on('change', (change) => {
+   *   console.log('Change detected:', change);
+   * });
+   *
+   * // Or use async iteration
+   * for await (const change of changeStream) {
+   *   console.log('Change detected:', change);
+   * }
+   *
+   * // Close the change stream when done
+   * changeStream.close();
+   * ```
+   */
+  watch(options: ChangeStreamOptions<T> = {}): ChangeStream<T> {
+    return new ChangeStream<T>(this.db, this.name, options);
   }
 
   /**
