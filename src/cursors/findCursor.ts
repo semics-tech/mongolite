@@ -252,8 +252,20 @@ export class FindCursor<T extends DocumentWithId> {
       if (Array.isArray(value) && value.length > 0) {
         const allConditions = value
           .map((item) => {
-            params.push(item);
-            return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE json_each.value = ?)`;
+            if (typeof item === 'object' && item !== null) {
+              // For object elements, we need to check if any array element matches all properties
+              const objectConditions: string[] = [];
+              for (const [key, val] of Object.entries(item)) {
+                params.push(toSQLiteValue(val));
+                objectConditions.push(`json_extract(json_each.value, '$.${key}') = ?`);
+              }
+              const condition = objectConditions.join(' AND ');
+              return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE ${condition})`;
+            } else {
+              // For simple values, use direct comparison
+              params.push(toSQLiteValue(item));
+              return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE json_each.value = ?)`;
+            }
           })
           .join(' AND ');
         return `(${arrayTypeCheck} AND ${allConditions})`;
@@ -270,7 +282,7 @@ export class FindCursor<T extends DocumentWithId> {
         elemMatchSubquery += conditions;
       } else {
         // Simple equality check for the entire element
-        params.push(value);
+        params.push(toSQLiteValue(value));
         elemMatchSubquery += `array_elements.value = ?`;
       }
 
