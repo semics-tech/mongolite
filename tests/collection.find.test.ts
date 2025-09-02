@@ -3,32 +3,6 @@ import assert from 'node:assert';
 import { MongoLite } from '../src/index';
 import { MongoLiteCollection, DocumentWithId } from '../src/index'; // Assuming DocumentWithId is exported
 
-/**
- * 
- * EXAMPLE NOT WORKING
- * {
-  cohorts: {
-    $all: [
-      {
-        CohortCode: "RTTPTL01",
-      },
-      {
-        CohortCode: "RTTPTL02",
-      },
-      {
-        CohortCode: "RTTPTL03",
-      },
-      {
-        CohortCode: "ERSASI01",
-      },
-    ],
-  },
-  ClientCode: "mbi-dev-ollie",
-  hierarchyLevel: {
-    $gt: 0,
-  },
-}
- */
 interface TestDoc extends DocumentWithId {
   name: string;
   value: number | null; // Allow null for testing
@@ -37,11 +11,15 @@ interface TestDoc extends DocumentWithId {
   match?: string;
   createdAt?: Date;
   updatedAt?: Date;
-  publishedAt?: Date;
+  publishedAt?: Date | string; // Allow ISO string for testing
   metadata?: {
     lastLogin?: Date;
     registrationDate?: Date;
   };
+  // Add fields for the complex $all test
+  groups?: Array<{ group: string | object }>;
+  code?: string;
+  hierarchyLevel?: number;
 }
 
 describe('MongoLiteCollection - Find Operations', () => {
@@ -102,7 +80,7 @@ describe('MongoLiteCollection - Find Operations', () => {
       match: 'test',
       createdAt: baseDate,
       publishedAt: new Date('2024-01-01T00:00:00.000Z'),
-    }, // Document with null value,
+    }, // Document with null value
   ];
 
   beforeEach(async () => {
@@ -123,7 +101,7 @@ describe('MongoLiteCollection - Find Operations', () => {
 
   describe('test raw query', () => {
     it('should execute a raw query and return results', async () => {
-      const docs = await client.db.all(
+      const docs = await client.database.all(
         `SELECT _id, data FROM "testFindCollection" WHERE json_extract(data, '$.tags[0]') = ?`,
         ['b']
       );
@@ -680,6 +658,104 @@ describe('MongoLiteCollection - Find Operations', () => {
       const docs = await collection.find({ 'nested.subValue': 'sv2' }).toArray();
       assert.strictEqual(docs.length, 1);
       assert.deepStrictEqual(docs[0], testDocs[4]); // anotherDoc with nested.subValue: 'sv2'
+    });
+  });
+
+  describe('find() $all complex', () => {
+    const complexDocs = [
+      // Add test documents for complex $all query
+      {
+        _id: '7',
+        name: 'complexDoc1',
+        value: 200,
+        groups: [{ group: 'a' }, { group: 'b' }, { group: 'c' }, { group: 'd' }],
+        code: 'testCode',
+        hierarchyLevel: 5,
+      },
+      {
+        _id: '8',
+        name: 'complexDoc2',
+        value: 210,
+        groups: [{ group: 'a' }, { group: 'b' }, { group: 'c' }],
+        code: 'testCode',
+        hierarchyLevel: 3,
+      },
+      {
+        _id: '9',
+        name: 'complexDoc3',
+        value: 220,
+        groups: [{ group: 'a' }, { group: 'b' }, { group: 'c' }, { group: 'd' }, { group: 'e' }],
+        code: 'testCode',
+        hierarchyLevel: 10,
+      },
+    ];
+
+    let complexAllCollection: MongoLiteCollection<TestDoc>;
+
+    beforeEach(async () => {
+      // Insert complex test documents
+      const client = new MongoLite(':memory:', {
+        verbose: true,
+      });
+      await client.connect();
+      complexAllCollection = client.collection<TestDoc>('testFindCollection');
+
+      await complexAllCollection.insertMany(complexDocs);
+    });
+
+    it('should test the complex $all query from the example', async () => {
+      // Test the exact query structure from the "NOT WORKING" example
+      const query = {
+        groups: {
+          $all: [{ group: 'a' }, { group: 'b' }, { group: 'c' }, { group: 'd' }],
+        },
+        code: 'testCode',
+        hierarchyLevel: { $gt: 0 },
+      };
+
+      const docs = await complexAllCollection.find(query).toArray();
+
+      // Should match docs that have ALL the required groups AND meet other criteria
+      // Only complexDoc1 (id: 7) and complexDoc3 (id: 9) have all 4 required groups
+      // Both have code: 'testCode' and hierarchyLevel > 0
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === '7')); // complexDoc1
+      assert.ok(docs.some((d) => d._id === '9')); // complexDoc3
+
+      // Verify that complexDoc2 (id: 8) is NOT included because it's missing groups
+      assert.ok(!docs.some((d) => d._id === '8'));
+    });
+
+    it('should test $all with partial matches', async () => {
+      // Test with fewer required groups - should match more documents
+      const query = {
+        groups: {
+          $all: [{ group: 'a' }, { group: 'b' }],
+        },
+        code: 'testCode',
+      };
+
+      const docs = await complexAllCollection.find(query).toArray();
+
+      // Should match all three complex docs since they all have these two groups
+      assert.strictEqual(docs.length, 3);
+      assert.ok(docs.some((d) => d._id === '7')); // complexDoc1
+      assert.ok(docs.some((d) => d._id === '8')); // complexDoc2
+      assert.ok(docs.some((d) => d._id === '9')); // complexDoc3
+    });
+
+    it('should test $all with non-matching groups', async () => {
+      // Test with groups that don't exist in any document
+      const query = {
+        groups: {
+          $all: [{ group: 'NONEXISTENT01' }, { group: 'NONEXISTENT02' }],
+        },
+      };
+
+      const docs = await complexAllCollection.find(query).toArray();
+
+      // Should match no documents
+      assert.strictEqual(docs.length, 0);
     });
   });
 });

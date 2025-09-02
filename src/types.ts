@@ -45,6 +45,7 @@ export interface QueryOperators<T> {
   $lte?: T;
   $in?: T[];
   $nin?: T[];
+  $all?: T extends unknown[] ? T : never;
   $exists?: boolean;
   $not?: QueryOperators<T>;
 }
