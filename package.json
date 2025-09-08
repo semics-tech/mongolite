@@ -58,7 +58,7 @@
     "@types/uuid": "^9.0.8",
     "better-sqlite3": "^12.1.1",
     "bson": "^6.10.4",
-    "uuid": "^11.1.0"
+    "uuid": "^13.0.0"
   },
   "files": [
     "dist/**/*",
