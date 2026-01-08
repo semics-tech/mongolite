@@ -13,6 +13,7 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "test:coverage": "c8 --reporter=lcov --reporter=text node --import tsx --test tests/*.test.ts",
     "prepare": "npm run build",
+    "prepublish": "npm run build",
     "lint": "eslint src/**/*.ts tests/**/*.ts",
     "lint:fix": "eslint src/**/*.ts tests/**/*.ts --fix",
     "verify-build": "node --import tsx scripts/verify-build.js",
