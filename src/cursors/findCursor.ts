@@ -202,7 +202,9 @@ export class FindCursor<T extends DocumentWithId> {
           return `${jsonPath} IS NOT NULL`;
         }
         params.push(toSQLiteValue(value));
-        return `${jsonPath} != ?`;
+        // In MongoDB, $ne matches documents where the field doesn't exist OR has a different value
+        // SQLite's NULL != ? returns NULL (falsy), so we need to explicitly include NULL
+        return `(${jsonPath} IS NULL OR ${jsonPath} != ?)`;
       case '$gt':
         params.push(toSQLiteValue(value));
         return `${jsonPath} > ?`;

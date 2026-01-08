@@ -172,9 +172,12 @@ describe('MongoLiteCollection - Find Operations', () => {
 
       it('should find documents by Date object using $ne operator', async () => {
         const docs = await collection.find({ createdAt: { $ne: baseDate } }).toArray();
-        assert.strictEqual(docs.length, 3);
+        // MongoDB semantics: $ne matches documents where the field is not equal to the value,
+        // OR where the field does not exist. So doc4 (no createdAt) should also match.
+        assert.strictEqual(docs.length, 4);
         assert.ok(docs.some((d) => d._id === '2')); // doc2
         assert.ok(docs.some((d) => d._id === '3')); // doc3
+        assert.ok(docs.some((d) => d._id === '4')); // doc4 - has no createdAt field
         assert.ok(docs.some((d) => d._id === '5')); // anotherDoc
       });
 
@@ -488,8 +491,10 @@ describe('MongoLiteCollection - Find Operations', () => {
 
     it('should find documents using $ne operator', async () => {
       const docs = await collection.find({ value: { $ne: 20 } }).toArray();
-      assert.strictEqual(docs.length, 3);
-      assert.ok(docs.every((d) => d.value !== 20));
+      // MongoDB semantics: $ne matches documents where field != value OR field doesn't exist
+      // emptyDoc has value: null (not equal to 20), so it matches
+      assert.strictEqual(docs.length, 4);
+      assert.ok(docs.every((d) => d.value !== 20 || d.value === null)); // null is also not 20
     });
 
     it('should find documents using $in operator for top-level field', async () => {
@@ -756,6 +761,122 @@ describe('MongoLiteCollection - Find Operations', () => {
 
       // Should match no documents
       assert.strictEqual(docs.length, 0);
+    });
+  });
+
+  describe('Complex OR query with $exists and null values', () => {
+    let client: MongoLite;
+    let orTestCollection: MongoLiteCollection<TestDoc>;
+
+    beforeEach(async () => {
+      client = new MongoLite(':memory:');
+      await client.connect();
+      orTestCollection = client.collection<TestDoc>('testOrCollection');
+
+      // Insert test documents
+      await orTestCollection.insertMany([
+        {
+          message: 'test message',
+          start: '2026-01-07T14:43:00.000Z',
+          end: '2026-01-09T14:43:00.000Z',
+          name: 'test',
+          value: null,
+          match: 'critical',
+          ClientCode: null,
+          // user field does not exist
+        },
+        {
+          message: 'test message 2',
+          start: '2026-01-07T14:43:00.000Z',
+          end: '2026-01-09T14:43:00.000Z',
+          name: 'test2',
+          value: null,
+          match: 'warning',
+          ClientCode: 'mbi-dev-ollie',
+          // user field does not exist
+        },
+        {
+          message: 'test message 3',
+          start: '2026-01-07T14:43:00.000Z',
+          end: '2026-01-09T14:43:00.000Z',
+          name: 'test3',
+          value: null,
+          match: 'info',
+          ClientCode: 'other-code',
+          nested: { subValue: 'value3' },
+        },
+      ]);
+    });
+
+    afterEach(async () => {
+      await client.close();
+    });
+
+    it('should find document matching $or with $exists false and null ClientCode', async () => {
+      // This is the query from the issue - it should match the first document
+      const query = {
+        end: {
+          $gte: '2026-01-08T11:52:19.432Z',
+        },
+        archived: {
+          $ne: true,
+        },
+        $or: [
+          {
+            ClientCode: 'mbi-dev-ollie',
+            user: {
+              $exists: false,
+            },
+          },
+          {
+            user: 'enterprise.test@mbihealth.com',
+          },
+          {
+            tags: {
+              $eq: 'enterprise.test@mbihealth.com',
+            },
+          },
+          {
+            ClientCode: null,
+            user: {
+              $exists: false,
+            },
+          },
+        ],
+      };
+
+      // Debug: enable verbose mode
+      const testCursor = orTestCollection.find(query);
+      const docs = await testCursor.toArray();
+
+      // Should match:
+      // - First document: ClientCode is null AND user doesn't exist -> 4th $or condition matches
+      // - Second document: ClientCode is 'mbi-dev-ollie' AND user doesn't exist -> 1st $or condition matches
+      assert.strictEqual(docs.length, 2, `Expected 2 documents, got ${docs.length}`);
+      assert.ok(docs.some((d) => d.name === 'test'), 'Should match first document with null ClientCode');
+      assert.ok(docs.some((d) => d.name === 'test2'), 'Should match second document with mbi-dev-ollie');
+    });
+
+    it('should handle $or with null value checks', async () => {
+      // Simpler test: just $or with null checks
+      const query = {
+        $or: [
+          {
+            ClientCode: null,
+            nested: { $exists: false },
+          },
+          {
+            ClientCode: 'mbi-dev-ollie',
+          },
+        ],
+      };
+
+      const docs = await orTestCollection.find(query).toArray();
+
+      // Should match first and second documents
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d.name === 'test'));
+      assert.ok(docs.some((d) => d.name === 'test2'));
     });
   });
 });
