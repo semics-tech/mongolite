@@ -137,6 +137,64 @@ export class FindCursor<T extends DocumentWithId> {
   }
 
   /**
+   * Helper method to build $in and $nin conditions for both array and non-array fields
+   */
+  private buildArrayComparisonCondition(
+    field: string,
+    value: unknown[],
+    operator: '$in' | '$nin',
+    params: unknown[],
+    elementPrefix: string = 'data'
+  ): string {
+    const jsonPath =
+      elementPrefix === 'data'
+        ? `json_extract(${elementPrefix}, ${this.parseJsonPath(field)})`
+        : `json_extract(${elementPrefix}.value, '$.${field}')`;
+
+    // For Date values, use simple comparison without json_each to avoid JSON serialization issues
+    const hasDate = value.some((v) => v instanceof Date);
+    if (hasDate) {
+      const operator_symbol = operator === '$in' ? '=' : '!=';
+      const joiner = operator === '$in' ? ' OR ' : ' AND ';
+      const conditions = value.map(() => `${jsonPath} ${operator_symbol} ?`).join(joiner);
+      params.push(...value.map((v) => toSQLiteValue(v)));
+
+      if (operator === '$in') {
+        return `(${conditions})`;
+      } else {
+        // For $nin with non-array fields, also include NULL
+        return `(${jsonPath} IS NULL OR ${conditions})`;
+      }
+    }
+
+    // For non-Date values, handle both array and non-array fields
+    const arrayPath = this.parseJsonPath(field);
+    const isArrayCheck = `json_type(json_extract(${elementPrefix}, ${arrayPath})) = 'array'`;
+    const placeholders = value.map(() => '?').join(',');
+
+    let arrayCondition: string;
+    let nonArrayCondition: string;
+
+    if (operator === '$in') {
+      arrayCondition = `EXISTS (SELECT 1 FROM json_each(json_extract(${elementPrefix}, ${arrayPath})) WHERE json_each.value IN (${placeholders}))`;
+      nonArrayCondition = `(${jsonPath} IN (${placeholders}))`;
+    } else {
+      // $nin
+      arrayCondition = `NOT EXISTS (SELECT 1 FROM json_each(json_extract(${elementPrefix}, ${arrayPath})) WHERE json_each.value IN (${placeholders}))`;
+      nonArrayCondition = `(${jsonPath} NOT IN (${placeholders}) OR ${jsonPath} IS NULL)`;
+    }
+
+    // Push parameters for both array and non-array conditions
+    params.push(...value.map((v) => toSQLiteValue(v))); // for array condition
+    params.push(...value.map((v) => toSQLiteValue(v))); // for non-array condition
+
+    return `(
+      (${isArrayCheck} AND ${arrayCondition}) OR
+      (json_type(json_extract(${elementPrefix}, ${arrayPath})) != 'array' AND ${nonArrayCondition})
+    )`;
+  }
+
+  /**
    * Helper method to generate a comparison condition
    */
   private buildComparisonCondition(
@@ -221,16 +279,12 @@ export class FindCursor<T extends DocumentWithId> {
         return value ? `${jsonPath} IS NOT NULL` : `${jsonPath} IS NULL`;
       case '$in':
         if (Array.isArray(value) && value.length > 0) {
-          const conditions = value.map(() => `${jsonPath} = ?`).join(' OR ');
-          params.push(...value.map((v) => toSQLiteValue(v)));
-          return `(${conditions})`;
+          return this.buildArrayComparisonCondition(field, value, '$in', params, elementPrefix);
         }
         return '1=0'; // Empty array, nothing matches
       case '$nin':
         if (Array.isArray(value) && value.length > 0) {
-          const conditions = value.map(() => `${jsonPath} != ?`).join(' AND ');
-          params.push(...value.map((v) => toSQLiteValue(v)));
-          return `(${conditions})`;
+          return this.buildArrayComparisonCondition(field, value, '$nin', params, elementPrefix);
         }
         return '1=1'; // Empty array, everything matches
       default:

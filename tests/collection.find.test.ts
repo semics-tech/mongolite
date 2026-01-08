@@ -223,8 +223,10 @@ describe('MongoLiteCollection - Find Operations', () => {
         const docs = await collection
           .find({ createdAt: { $nin: [baseDate, testDate1] } })
           .toArray();
-        assert.strictEqual(docs.length, 2);
+        // MongoDB semantics: $nin matches documents where field is not in the list OR field doesn't exist
+        assert.strictEqual(docs.length, 3);
         assert.ok(docs.some((d) => d._id === '3')); // doc3 created at testDate2
+        assert.ok(docs.some((d) => d._id === '4')); // doc4 has no createdAt field
         assert.ok(docs.some((d) => d._id === '5')); // anotherDoc created at testDate3
       });
 
@@ -853,8 +855,14 @@ describe('MongoLiteCollection - Find Operations', () => {
       // - First document: ClientCode is null AND user doesn't exist -> 4th $or condition matches
       // - Second document: ClientCode is 'mbi-dev-ollie' AND user doesn't exist -> 1st $or condition matches
       assert.strictEqual(docs.length, 2, `Expected 2 documents, got ${docs.length}`);
-      assert.ok(docs.some((d) => d.name === 'test'), 'Should match first document with null ClientCode');
-      assert.ok(docs.some((d) => d.name === 'test2'), 'Should match second document with mbi-dev-ollie');
+      assert.ok(
+        docs.some((d) => d.name === 'test'),
+        'Should match first document with null ClientCode'
+      );
+      assert.ok(
+        docs.some((d) => d.name === 'test2'),
+        'Should match second document with mbi-dev-ollie'
+      );
     });
 
     it('should handle $or with null value checks', async () => {
@@ -877,6 +885,144 @@ describe('MongoLiteCollection - Find Operations', () => {
       assert.strictEqual(docs.length, 2);
       assert.ok(docs.some((d) => d.name === 'test'));
       assert.ok(docs.some((d) => d.name === 'test2'));
+    });
+  });
+
+  describe('$in operator with array fields', () => {
+    let client: MongoLite;
+    let inTestCollection: MongoLiteCollection<TestDoc>;
+
+    beforeEach(async () => {
+      client = new MongoLite(':memory:');
+      await client.connect();
+      inTestCollection = client.collection<TestDoc>('testInCollection');
+
+      // Insert test documents with array fields
+      await inTestCollection.insertMany([
+        {
+          _id: 'doc1',
+          name: 'Document 1',
+          value: 1,
+          usersToShareWith: ['user1@example.com', 'user2@example.com'],
+          createdBy: 'admin@example.com',
+          ClientCode: 'CLIENT-001',
+        },
+        {
+          _id: 'doc2',
+          name: 'Document 2',
+          value: 2,
+          usersToShareWith: ['user1@example.com', 'user3@example.com'],
+          createdBy: 'admin@example.com',
+          ClientCode: 'CLIENT-001',
+        },
+        {
+          _id: 'doc3',
+          name: 'Document 3',
+          value: 3,
+          usersToShareWith: ['user4@example.com'],
+          createdBy: 'user3@example.com',
+          ClientCode: 'CLIENT-001',
+        },
+        {
+          _id: 'doc4',
+          name: 'Document 4',
+          value: 4,
+          usersToShareWith: ['user5@example.com', 'user6@example.com'],
+          createdBy: 'admin@example.com',
+          ClientCode: 'CLIENT-002',
+        },
+      ]);
+    });
+
+    afterEach(async () => {
+      await client.close();
+    });
+
+    it('should find documents where array field contains a value using $in with single value', async () => {
+      const docs = await inTestCollection
+        .find({
+          usersToShareWith: {
+            $in: ['user1@example.com'],
+          },
+        })
+        .toArray();
+
+      // Should match doc1 and doc2 which contain user1@example.com in their usersToShareWith array
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === 'doc1'));
+      assert.ok(docs.some((d) => d._id === 'doc2'));
+    });
+
+    it('should find documents where array field contains any value from $in list', async () => {
+      const docs = await inTestCollection
+        .find({
+          usersToShareWith: {
+            $in: ['user2@example.com', 'user4@example.com'],
+          },
+        })
+        .toArray();
+
+      // Should match doc1 (has user2) and doc3 (has user4)
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === 'doc1'));
+      assert.ok(docs.some((d) => d._id === 'doc3'));
+    });
+
+    it('should use $or with $in on array fields - complex query from issue', async () => {
+      // This is the exact query pattern from the issue
+      const userEmail = 'user1@example.com';
+      const clientCode = 'CLIENT-001';
+
+      const docs = await inTestCollection
+        .find({
+          ClientCode: clientCode,
+          $or: [
+            {
+              createdBy: userEmail,
+            },
+            {
+              usersToShareWith: {
+                $in: [userEmail],
+              },
+            },
+            {
+              hierarchyLevel: {
+                $lte: 1,
+              },
+            },
+          ],
+        })
+        .toArray();
+
+      // Should match:
+      // - doc2: createdBy is 'user1@example.com' (1st $or condition)
+      // - doc1: usersToShareWith contains 'user1@example.com' (2nd $or condition)
+      // Note: no docs have hierarchyLevel defined, so 3rd condition matches nothing
+      assert.strictEqual(docs.length, 2, `Expected 2 documents, got ${docs.length}`);
+      assert.ok(
+        docs.some((d) => d._id === 'doc1'),
+        'Should match doc1 (user in usersToShareWith)'
+      );
+      assert.ok(
+        docs.some((d) => d._id === 'doc2'),
+        'Should match doc2 (createdBy)'
+      );
+      assert.ok(!docs.some((d) => d._id === 'doc3'), 'Should not match doc3');
+      assert.ok(!docs.some((d) => d._id === 'doc4'), 'Should not match doc4');
+    });
+
+    it('should find documents where array field matches a direct value (without operators)', async () => {
+      // MongoDB allows matching array elements directly without $in
+      const docs = await inTestCollection
+        .find({
+          usersToShareWith: 'user1@example.com',
+        })
+        .toArray();
+
+      // Should match doc1 and doc2
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d._id === 'doc1'));
+      assert.ok(docs.some((d) => d._id === 'doc2'));
     });
   });
 });
