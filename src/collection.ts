@@ -388,7 +388,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param projection Optional. Specifies the fields to return.
    * @returns {Promise<T | null>} The found document or `null`.
    */
-  async findOne(filter: Filter<T>, projection?: Projection<T>): Promise<Partial<T> | null> {
+  async findOne(filter: Filter<T>, projection?: Projection<T>): Promise<T | null> {
     await this.ensureTable();
     const cursor = this.find(filter).limit(1);
     if (projection) {

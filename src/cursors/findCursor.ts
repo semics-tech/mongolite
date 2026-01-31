@@ -497,7 +497,7 @@ export class FindCursor<T extends DocumentWithId> {
     return this;
   }
 
-  private applyProjection(doc: T): Partial<T> {
+  private applyProjection(doc: T): T {
     if (!this.projectionFields) return doc;
 
     const projectedDoc: Partial<T> = {};
@@ -605,14 +605,14 @@ export class FindCursor<T extends DocumentWithId> {
         }
       }
     }
-    return projectedDoc;
+    return projectedDoc as T;
   }
 
   /**
    * Executes the query and returns all matching documents as an array.
    * @returns A promise that resolves to an array of documents.
    */
-  public async toArray(): Promise<Partial<T>[]> {
+  public async toArray(): Promise<T[]> {
     let finalSql = this.queryParts.sql;
     const finalParams = [...this.queryParts.params];
 
@@ -658,7 +658,7 @@ export class FindCursor<T extends DocumentWithId> {
    *  @returns A promise that resolves to the first matching document or null if no matches are found.
    *  @throws Error if the query fails.
    */
-  public async first(): Promise<Partial<T> | null> {
+  public async first(): Promise<T | null> {
     const results = await this.limit(1).toArray();
     return results.length > 0 ? results[0] : null;
   }
