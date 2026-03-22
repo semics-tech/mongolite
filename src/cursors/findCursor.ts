@@ -491,13 +491,24 @@ export class FindCursor<T extends DocumentWithId> {
    * @param projection An object where keys are field names and values are 1 (include) or 0 (exclude).
    * `_id` is included by default unless explicitly excluded.
    * @returns The `FindCursor` instance for chaining.
+   * @remarks When using projections, the returned documents may have undefined fields at runtime,
+   * though the TypeScript type will still be `T`. Consumers should be aware that projected-out
+   * fields will be undefined.
    */
   public project(projection: Projection<T>): this {
     this.projectionFields = projection;
     return this;
   }
 
-  private applyProjection(doc: T): Partial<T> {
+  /**
+   * Applies projection to a document, returning only the specified fields.
+   * @param doc The full document to apply projection to
+   * @returns The projected document. When a projection is applied, some fields may be undefined
+   * at runtime despite the return type being `T`. This trade-off provides better developer
+   * experience for the common case (no projection) while maintaining type compatibility.
+   * @private
+   */
+  private applyProjection(doc: T): T {
     if (!this.projectionFields) return doc;
 
     const projectedDoc: Partial<T> = {};
@@ -605,14 +616,17 @@ export class FindCursor<T extends DocumentWithId> {
         }
       }
     }
-    return projectedDoc;
+    // Type assertion: We return T instead of Partial<T> for better developer experience.
+    // When no projection is used, this is accurate. When a projection is used, consumers
+    // should be aware that some fields may be undefined at runtime.
+    return projectedDoc as T;
   }
 
   /**
    * Executes the query and returns all matching documents as an array.
    * @returns A promise that resolves to an array of documents.
    */
-  public async toArray(): Promise<Partial<T>[]> {
+  public async toArray(): Promise<T[]> {
     let finalSql = this.queryParts.sql;
     const finalParams = [...this.queryParts.params];
 
@@ -658,7 +672,7 @@ export class FindCursor<T extends DocumentWithId> {
    *  @returns A promise that resolves to the first matching document or null if no matches are found.
    *  @throws Error if the query fails.
    */
-  public async first(): Promise<Partial<T> | null> {
+  public async first(): Promise<T | null> {
     const results = await this.limit(1).toArray();
     return results.length > 0 ? results[0] : null;
   }

@@ -387,8 +387,11 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param filter The query criteria.
    * @param projection Optional. Specifies the fields to return.
    * @returns {Promise<T | null>} The found document or `null`.
+   * @remarks When using a projection, some fields may be undefined at runtime despite the
+   * return type being `T`. This provides better ergonomics for the common case where no
+   * projection is used.
    */
-  async findOne(filter: Filter<T>, projection?: Projection<T>): Promise<Partial<T> | null> {
+  async findOne(filter: Filter<T>, projection?: Projection<T>): Promise<T | null> {
     await this.ensureTable();
     const cursor = this.find(filter).limit(1);
     if (projection) {
