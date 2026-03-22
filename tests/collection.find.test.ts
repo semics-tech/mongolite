@@ -853,8 +853,14 @@ describe('MongoLiteCollection - Find Operations', () => {
       // - First document: ClientCode is null AND user doesn't exist -> 4th $or condition matches
       // - Second document: ClientCode is 'mbi-dev-ollie' AND user doesn't exist -> 1st $or condition matches
       assert.strictEqual(docs.length, 2, `Expected 2 documents, got ${docs.length}`);
-      assert.ok(docs.some((d) => d.name === 'test'), 'Should match first document with null ClientCode');
-      assert.ok(docs.some((d) => d.name === 'test2'), 'Should match second document with mbi-dev-ollie');
+      assert.ok(
+        docs.some((d) => d.name === 'test'),
+        'Should match first document with null ClientCode'
+      );
+      assert.ok(
+        docs.some((d) => d.name === 'test2'),
+        'Should match second document with mbi-dev-ollie'
+      );
     });
 
     it('should handle $or with null value checks', async () => {

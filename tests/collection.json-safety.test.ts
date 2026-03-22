@@ -170,7 +170,7 @@ describe('MongoLiteCollection - JSON Safety', () => {
       const retrieved = await collection.findOne({ _id: result.insertedId });
       assert.ok(retrieved);
       assert.strictEqual(retrieved._id, result.insertedId);
-      
+
       // Should have corruption markers
       assert.ok('__mongoLiteCorrupted' in retrieved);
       assert.strictEqual(retrieved.__mongoLiteCorrupted, true);
