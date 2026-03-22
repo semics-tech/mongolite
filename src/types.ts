@@ -15,6 +15,15 @@ export interface InsertOneResult {
 }
 
 /**
+ * Result of insertMany operation.
+ */
+export interface InsertManyResult {
+  acknowledged: boolean;
+  insertedCount: number;
+  insertedIds: Record<number, string>;
+}
+
+/**
  * Result of updateOne operation.
  */
 export interface UpdateResult {
@@ -25,12 +34,53 @@ export interface UpdateResult {
 }
 
 /**
+ * Result of findOneAndUpdate/findOneAndReplace/findOneAndDelete operations.
+ */
+export interface ModifyResult<T> {
+  value: T | null;
+  ok: 1;
+}
+
+/**
  * Result of deleteOne/deleteMany operations.
  */
 export interface DeleteResult {
   acknowledged: boolean;
   deletedCount: number;
 }
+
+/**
+ * Options for findOneAndUpdate operations.
+ */
+export interface FindOneAndUpdateOptions {
+  /** Whether to return the document before ('before') or after ('after') the update. Default is 'before'. */
+  returnDocument?: 'before' | 'after';
+  /** If true, insert a new document when no match is found. */
+  upsert?: boolean;
+  /** Field projection to apply. */
+  projection?: Projection<DocumentWithId>;
+}
+
+/**
+ * Options for findOneAndDelete operations.
+ */
+export interface FindOneAndDeleteOptions {
+  /** Field projection to apply. */
+  projection?: Projection<DocumentWithId>;
+}
+
+/**
+ * Options for replaceOne operations.
+ */
+export interface ReplaceOptions {
+  /** If true, insert a new document when no match is found. */
+  upsert?: boolean;
+}
+
+/**
+ * Options for aggregate operations.
+ */
+export type AggregationPipeline = Record<string, unknown>[];
 
 /**
  * Operators for filtering documents.
@@ -48,6 +98,16 @@ export interface QueryOperators<T> {
   $all?: T extends unknown[] ? T : never;
   $exists?: boolean;
   $not?: QueryOperators<T>;
+  /** Regular expression pattern match. Can be a string pattern or RegExp object. */
+  $regex?: string | RegExp;
+  /** Regex options (flags). Used alongside $regex. E.g. 'i' for case-insensitive. */
+  $options?: string;
+  /** Matches arrays with the specified number of elements. */
+  $size?: number;
+  /** Selects documents where the value of the field is an instance of the specified BSON type. */
+  $type?: number | string | (number | string)[];
+  /** Matches documents where a field value divided by a divisor has a specified remainder. */
+  $mod?: [number, number];
 }
 
 /**
@@ -107,6 +167,42 @@ export interface UpdateOperators<T> {
     [P in keyof T]?: unknown;
   } & {
     [key: string]: unknown;
+  };
+  /** Adds a value to an array field only if the value is not already present. */
+  $addToSet?: {
+    [P in keyof T]?: unknown | { $each: unknown[] };
+  } & {
+    [key: string]: unknown | { $each: unknown[] };
+  };
+  /** Removes the first or last element from an array. Use 1 for last, -1 for first. */
+  $pop?: {
+    [P in keyof T]?: 1 | -1;
+  } & {
+    [key: string]: 1 | -1;
+  };
+  /** Multiplies the current value of a field by a number. */
+  $mul?: {
+    [P in keyof T]?: number;
+  } & {
+    [key: string]: number;
+  };
+  /** Updates the field value to the minimum of the current value and the specified value. */
+  $min?: {
+    [P in keyof T]?: T[P];
+  } & {
+    [key: string]: unknown;
+  };
+  /** Updates the field value to the maximum of the current value and the specified value. */
+  $max?: {
+    [P in keyof T]?: T[P];
+  } & {
+    [key: string]: unknown;
+  };
+  /** Sets the value of a field to the current date. */
+  $currentDate?: {
+    [P in keyof T]?: true | { $type: 'date' | 'timestamp' };
+  } & {
+    [key: string]: true | { $type: 'date' | 'timestamp' };
   };
 }
 

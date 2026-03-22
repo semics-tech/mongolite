@@ -233,8 +233,122 @@ export class FindCursor<T extends DocumentWithId> {
           return `(${conditions})`;
         }
         return '1=1'; // Empty array, everything matches
+      case '$options':
+        // Consumed by $regex handling in buildWhereClause; no separate SQL condition needed
+        return '1=1';
+      case '$regex': {
+        // When called from buildComparisonCondition directly (no $options context),
+        // extract flags from a RegExp value if provided
+        let src: string;
+        let flags = '';
+        if (value instanceof RegExp) {
+          src = value.source;
+          flags = value.flags;
+        } else if (typeof value === 'string') {
+          src = value;
+        } else {
+          return '1=0';
+        }
+        const textExpr = `CAST(${jsonPath} AS TEXT)`;
+        if (flags) {
+          params.push(src, flags);
+          return `regexp_flags(?, ?, ${textExpr}) = 1`;
+        } else {
+          params.push(src);
+          return `regexp(?, ${textExpr}) = 1`;
+        }
+      }
+      case '$size':
+        // Matches arrays with exactly N elements
+        params.push(value);
+        return `json_array_length(${jsonPath}) = ?`;
+      case '$type': {
+        // Map BSON type numbers/names to SQLite json_type() values
+        const mapBsonType = (bsonType: unknown): string[] => {
+          const typeMap: Record<string | number, string[]> = {
+            1: ['real', 'integer'],
+            2: ['text'],
+            3: ['object'],
+            4: ['array'],
+            8: ['true', 'false'],
+            9: ['text'],
+            10: ['null'],
+            16: ['integer'],
+            18: ['integer'],
+            double: ['real', 'integer'],
+            string: ['text'],
+            object: ['object'],
+            array: ['array'],
+            bool: ['true', 'false'],
+            boolean: ['true', 'false'],
+            date: ['text'],
+            null: ['null'],
+            int: ['integer'],
+            long: ['integer'],
+            number: ['real', 'integer'],
+          };
+          return typeMap[bsonType as string | number] ?? [];
+        };
+        const typeArgs = Array.isArray(value) ? value : [value];
+        const allSqlTypes = typeArgs.flatMap((t) => mapBsonType(t));
+        const uniqueTypes = [...new Set(allSqlTypes)];
+        if (uniqueTypes.length === 0) return '1=0';
+        // Use json_type(json, path) form which correctly identifies type of JSON values
+        const typePath =
+          elementPrefix === 'data'
+            ? `json_type(${elementPrefix}, '$.${field}')`
+            : `json_type(${elementPrefix}.value, '$.${field}')`;
+        const typeConds = uniqueTypes.map(() => `${typePath} = ?`).join(' OR ');
+        params.push(...uniqueTypes);
+        return uniqueTypes.length === 1 ? `${typePath} = ?` : `(${typeConds})`;
+      }
+      case '$mod': {
+        // Matches where field % divisor === remainder
+        if (Array.isArray(value) && value.length === 2) {
+          params.push(value[0], value[1]);
+          return `(CAST(${jsonPath} AS INTEGER) % ? = ?)`;
+        }
+        return '1=0';
+      }
       default:
         return '1=0'; // Unsupported operator
+    }
+  }
+
+  /**
+   * Builds a regex condition with optional flags from $options.
+   */
+  private buildRegexCondition(
+    field: string,
+    value: unknown,
+    options: unknown,
+    params: unknown[],
+    elementPrefix: string = 'data'
+  ): string {
+    let src: string;
+    let flags = typeof options === 'string' ? options : '';
+
+    if (value instanceof RegExp) {
+      src = value.source;
+      flags = value.flags || flags;
+    } else if (typeof value === 'string') {
+      src = value;
+    } else {
+      return '1=0';
+    }
+
+    const jsonPath =
+      elementPrefix === 'data'
+        ? `json_extract(${elementPrefix}, ${this.parseJsonPath(field)})`
+        : `json_extract(${elementPrefix}.value, '$.${field}')`;
+    const textExpr = `CAST(${jsonPath} AS TEXT)`;
+
+    if (flags) {
+      params.push(src, flags);
+      return `regexp_flags(?, ?, ${textExpr}) = 1`;
+    } else {
+      params.push(src);
+      return `regexp(?, ${textExpr}) = 1`;
     }
   }
 
@@ -407,16 +521,26 @@ export class FindCursor<T extends DocumentWithId> {
             const jsonPath = this.parseJsonPath(key);
             conditions.push(`json_extract(data, ${jsonPath}) = ?`);
             params.push(toSQLiteValue(value));
+          } else if (value instanceof RegExp) {
+            // Support bare RegExp values: { field: /pattern/i }
+            conditions.push(this.buildRegexCondition(key, value, value.flags, params));
           } else if (typeof value === 'object' && value !== null) {
             // Check if any key is an operator
             const hasOperators = Object.keys(value).some((k) => k.startsWith('$'));
 
             if (hasOperators) {
-              // Handle operators for this field
-              const opConditions = Object.entries(value)
+              // Handle operators for this field.
+              // Extract $options for use with $regex if both are present.
+              const ops = value as Record<string, unknown>;
+              const regexOptions = ops['$options'];
+              const opConditions = Object.entries(ops)
+                .filter(([op]) => op !== '$options') // $options is consumed alongside $regex
                 .map(([op, opValue]) => {
                   if (op === '$elemMatch' || op === '$all') {
                     return this.buildArraySubquery(key, op, opValue, params);
+                  }
+                  if (op === '$regex') {
+                    return this.buildRegexCondition(key, opValue, regexOptions, params);
                   }
                   return this.buildComparisonCondition(key, op, opValue, params);
                 })
