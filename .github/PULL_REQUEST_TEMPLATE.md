@@ -2,7 +2,8 @@
 
 A clear and concise description of what this pull request does and why.
 
-Fixes # (issue number, if applicable)
+<!-- If this PR resolves an issue, replace ISSUE_NUMBER below. Otherwise remove this line. -->
+Fixes #ISSUE_NUMBER
 
 ## Type of Change
 
@@ -15,9 +16,7 @@ Fixes # (issue number, if applicable)
 
 ## Changes Made
 
-- 
-- 
-- 
+- List key changes here.
 
 ## Motivation & Context
 
@@ -31,10 +30,10 @@ Describe the tests you ran to verify your changes.
 - [ ] New tests added to cover changes
 - [ ] Manual testing performed (describe below)
 
-**Manual testing steps:**
+**Manual testing steps (if applicable):**
 
-1. 
-2. 
+<!-- Replace the example step below with your actual manual testing steps. Add, remove, or expand steps as needed. -->
+1. [Example] Describe the manual action taken and the expected outcome.
 
 ## Checklist
 
@@ -43,7 +42,7 @@ Describe the tests you ran to verify your changes.
 - [ ] I have commented on complex or non-obvious sections of code
 - [ ] My changes generate no new warnings or errors
 - [ ] The build succeeds (`npm run build`)
-- [ ] All tests pass (`npm test`)
+- [ ] I have documented my testing (automated and/or manual) in the **Testing** section above
 - [ ] I have updated documentation where necessary
 
 ## Screenshots / Output (if applicable)
