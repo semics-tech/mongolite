@@ -1,5 +1,5 @@
 import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../types.js';
-import { SQLiteDB } from '../db.js';
+import { IDatabaseAdapter } from '../db.js';
 
 /**
  * Safely parses JSON data with fallback mechanisms for malformed JSON.
@@ -124,7 +124,7 @@ export class FindCursor<T extends DocumentWithId> {
   private projectionFields: Projection<T> | null = null;
 
   constructor(
-    private db: SQLiteDB,
+    private db: IDatabaseAdapter,
     private collectionName: string,
     initialFilter: Filter<T>,
     private readonly options: { verbose?: boolean } = {}

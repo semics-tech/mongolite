@@ -45,6 +45,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.0",
+    "@types/sql.js": "^1.4.10",
     "@typescript-eslint/eslint-plugin": "^7.9.0",
     "@typescript-eslint/parser": "^7.9.0",
     "c8": "^11.0.0",
@@ -60,6 +61,7 @@
     "@types/uuid": "^9.0.8",
     "better-sqlite3": "^12.1.1",
     "bson": "^7.2.0",
+    "sql.js": "^1.14.1",
     "uuid": "^13.0.0"
   },
   "files": [

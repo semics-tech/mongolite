@@ -9,10 +9,24 @@ export interface MongoLiteOptions {
 }
 
 /**
+ * Common interface implemented by all database adapters (Node.js and browser).
+ * MongoLiteCollection, FindCursor, and ChangeStream all depend on this interface
+ * rather than the concrete SQLiteDB class, enabling browser SQLite support.
+ */
+export interface IDatabaseAdapter {
+  connect(): Promise<void>;
+  run(sql: string, params?: unknown[]): Promise<{ lastID: number; changes: number }>;
+  get<T>(sql: string, params?: unknown[]): Promise<T | undefined>;
+  all<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  exec(sql: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+/**
  * SQLiteDB class provides a wrapper around the better-sqlite3 library
  * to simplify database operations.
  */
-export class SQLiteDB {
+export class SQLiteDB implements IDatabaseAdapter {
   private db: Database.Database | null = null;
   private readonly filePath: string;
   private readonly verbose: boolean;
