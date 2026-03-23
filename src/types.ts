@@ -52,21 +52,33 @@ export interface DeleteResult {
 /**
  * Options for findOneAndUpdate operations.
  */
-export interface FindOneAndUpdateOptions {
+export interface FindOneAndUpdateOptions<TSchema = DocumentWithId> {
   /** Whether to return the document before ('before') or after ('after') the update. Default is 'before'. */
   returnDocument?: 'before' | 'after';
   /** If true, insert a new document when no match is found. */
   upsert?: boolean;
   /** Field projection to apply. */
-  projection?: Projection<DocumentWithId>;
+  projection?: Projection<TSchema>;
 }
 
 /**
  * Options for findOneAndDelete operations.
  */
-export interface FindOneAndDeleteOptions {
+export interface FindOneAndDeleteOptions<TSchema = DocumentWithId> {
   /** Field projection to apply. */
-  projection?: Projection<DocumentWithId>;
+  projection?: Projection<TSchema>;
+}
+
+/**
+ * Options for findOneAndReplace operations.
+ */
+export interface FindOneAndReplaceOptions<TSchema = DocumentWithId> {
+  /** Whether to return the document before ('before') or after ('after') the replacement. Default is 'before'. */
+  returnDocument?: 'before' | 'after';
+  /** If true, insert a new document when no match is found. */
+  upsert?: boolean;
+  /** Field projection to apply. */
+  projection?: Projection<TSchema>;
 }
 
 /**

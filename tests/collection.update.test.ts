@@ -918,6 +918,29 @@ describe('MongoLiteCollection - Extended Update Operators', () => {
       assert.ok(setDate <= afterUpdate);
     });
 
+    it('should set a field to an ISO string when $type is "date"', async () => {
+      const beforeUpdate = new Date();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await collection.updateOne({ _id: '1' }, { $currentDate: { createdAt: { $type: 'date' } } } as any);
+      const doc = await collection.findOne({ _id: '1' });
+      assert.ok(doc?.createdAt, 'createdAt should be set');
+      const afterUpdate = new Date();
+      const setDate = new Date(doc!.createdAt!);
+      assert.ok(setDate >= beforeUpdate);
+      assert.ok(setDate <= afterUpdate);
+    });
+
+    it('should set a field to a numeric timestamp when $type is "timestamp"', async () => {
+      const beforeMs = Date.now();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await collection.updateOne({ _id: '1' }, { $currentDate: { updatedAt: { $type: 'timestamp' } } } as any);
+      const doc = await collection.findOne({ _id: '1' });
+      const afterMs = Date.now();
+      assert.ok(typeof doc?.updatedAt === 'number', 'updatedAt should be a numeric timestamp');
+      assert.ok((doc!.updatedAt as number) >= beforeMs);
+      assert.ok((doc!.updatedAt as number) <= afterMs);
+    });
+
     it('should work with updateMany', async () => {
       await collection.updateMany({ category: 'A' }, { $currentDate: { createdAt: true } });
       const alice = await collection.findOne({ _id: '1' });

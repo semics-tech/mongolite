@@ -7,7 +7,6 @@ import {
   InsertOneResult,
   InsertManyResult,
   UpdateResult,
-  ModifyResult,
   DeleteResult,
   Projection,
   SQLiteRow,
@@ -18,6 +17,7 @@ import {
   IndexInfo,
   FindOneAndUpdateOptions,
   FindOneAndDeleteOptions,
+  FindOneAndReplaceOptions,
   ReplaceOptions,
   AggregationPipeline,
 } from './types.js';
@@ -652,8 +652,36 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
         case '$currentDate':
           for (const path in opArgs) {
-            this.setNestedValue(currentDoc, path, new Date().toISOString());
-            modified = true;
+            const value = opArgs[path as keyof typeof opArgs];
+
+            if (value === true) {
+              // Default: store as ISO string date
+              this.setNestedValue(currentDoc, path, new Date().toISOString());
+              modified = true;
+              continue;
+            }
+
+            if (value && typeof value === 'object' && '$type' in value) {
+              const typeValue = (value as { $type?: unknown }).$type;
+              if (typeValue === 'date') {
+                this.setNestedValue(currentDoc, path, new Date().toISOString());
+                modified = true;
+                continue;
+              }
+              if (typeValue === 'timestamp') {
+                // Represent timestamp as a numeric UNIX epoch in milliseconds
+                this.setNestedValue(currentDoc, path, Date.now());
+                modified = true;
+                continue;
+              }
+              throw new Error(
+                `Unsupported $currentDate $type value for path "${path}": ${JSON.stringify(typeValue)}`
+              );
+            }
+
+            throw new Error(
+              `Unsupported $currentDate value for path "${path}": ${JSON.stringify(value)}`
+            );
           }
           break;
       }
@@ -1276,24 +1304,30 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async findOneAndUpdate(
     filter: Filter<T>,
     update: UpdateFilter<T>,
-    options: FindOneAndUpdateOptions = {}
+    options: FindOneAndUpdateOptions<T> = {}
   ): Promise<T | null> {
     await this.ensureTable();
     const { returnDocument = 'before', upsert = false, projection } = options;
 
-    const cursor = this.find(filter).limit(1);
-    if (projection) cursor.project(projection as Projection<T>);
-    const docs = await cursor.toArray();
-    const existingDoc = docs.length > 0 ? docs[0] : null;
+    // Fetch the target document without projection so we always have the _id
+    const idDocs = await this.find(filter).limit(1).toArray();
+    const existingFullDoc = idDocs.length > 0 ? (idDocs[0] as T & DocumentWithId) : null;
+    const existingId = existingFullDoc?._id;
 
-    if (!existingDoc && !upsert) {
+    if (!existingFullDoc && !upsert) {
       return null;
     }
 
-    const updateResult = await this.updateOne(filter, update, { upsert });
+    // Update by _id when available to ensure we modify the exact document we found
+    const updateFilter: Filter<T> =
+      existingId !== undefined && existingId !== null
+        ? ({ _id: existingId } as Filter<T>)
+        : filter;
+
+    const updateResult = await this.updateOne(updateFilter, update, { upsert });
 
     if (returnDocument === 'after') {
-      const targetId = updateResult.upsertedId ?? existingDoc?._id;
+      const targetId = updateResult.upsertedId ?? existingId;
       if (!targetId) return null;
       const afterCursor = this.find({ _id: targetId } as Filter<T>).limit(1);
       if (projection) afterCursor.project(projection as Projection<T>);
@@ -1301,7 +1335,24 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       return afterDocs.length > 0 ? afterDocs[0] : null;
     }
 
-    return existingDoc;
+    // returnDocument === 'before'
+    if (!existingFullDoc) {
+      // Upsert case where no original document existed
+      return null;
+    }
+
+    if (!projection) {
+      return existingFullDoc as T;
+    }
+
+    // Apply projection to the located document by _id
+    if (existingId === undefined || existingId === null) {
+      return null;
+    }
+    const beforeCursor = this.find({ _id: existingId } as Filter<T>).limit(1);
+    beforeCursor.project(projection as Projection<T>);
+    const beforeDocs = await beforeCursor.toArray();
+    return beforeDocs.length > 0 ? beforeDocs[0] : null;
   }
 
   /**
@@ -1312,38 +1363,50 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async findOneAndDelete(
     filter: Filter<T>,
-    options: FindOneAndDeleteOptions = {}
+    options: FindOneAndDeleteOptions<T> = {}
   ): Promise<T | null> {
     await this.ensureTable();
     const { projection } = options;
 
-    const cursor = this.find(filter).limit(1);
-    if (projection) cursor.project(projection as Projection<T>);
-    const docs = await cursor.toArray();
-    const existingDoc = docs.length > 0 ? docs[0] : null;
+    // Fetch without projection to always have _id for the delete
+    const idDocs = await this.find(filter).limit(1).toArray();
+    const existingFullDoc = idDocs.length > 0 ? (idDocs[0] as T & DocumentWithId) : null;
 
-    if (!existingDoc) {
+    if (!existingFullDoc) {
       return null;
     }
 
-    await this.deleteOne({ _id: existingDoc._id } as Filter<T>);
-    return existingDoc;
+    await this.deleteOne({ _id: existingFullDoc._id } as Filter<T>);
+
+    if (!projection) {
+      return existingFullDoc as T;
+    }
+
+    // Apply projection to the in-memory document
+    const projCursor = this.find({ _id: existingFullDoc._id } as Filter<T>).limit(1);
+    projCursor.project(projection as Projection<T>);
+    // Since we already deleted, apply projection manually from the full doc
+    const fullDocRec = existingFullDoc as Record<string, unknown>;
+    return this.applyAggregateProjection(
+      fullDocRec,
+      projection as Record<string, unknown>
+    ) as T;
   }
 
   /**
    * Finds a single document matching the filter and replaces it entirely.
    * @param filter The selection criteria.
    * @param replacement The replacement document (replaces all fields except _id).
-   * @param options Options including returnDocument and upsert.
+   * @param options Options including returnDocument, upsert, and projection.
    * @returns {Promise<T | null>} The document before or after the replacement, or null.
    */
   async findOneAndReplace(
     filter: Filter<T>,
     replacement: Omit<T, '_id'>,
-    options: FindOneAndUpdateOptions = {}
+    options: FindOneAndReplaceOptions<T> = {}
   ): Promise<T | null> {
     await this.ensureTable();
-    const { returnDocument = 'before', upsert = false } = options;
+    const { returnDocument = 'before', upsert = false, projection } = options;
 
     const existingDoc = await this.findOne(filter);
 
@@ -1355,15 +1418,43 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       const docId = existingDoc._id!;
       const newData = safeJsonStringify(replacement, `findOneAndReplace for ${docId}`);
       await this.db.run(`UPDATE "${this.name}" SET data = ? WHERE _id = ?`, [newData, docId]);
+
       if (returnDocument === 'after') {
-        return this.findOne({ _id: docId } as Filter<T>);
+        const afterCursor = this.find({ _id: docId } as Filter<T>).limit(1);
+        if (projection) afterCursor.project(projection as Projection<T>);
+        const afterDocs = await afterCursor.toArray();
+        return afterDocs.length > 0 ? afterDocs[0] : null;
       }
-      return existingDoc;
+
+      if (!projection) {
+        return existingDoc;
+      }
+      // Apply projection to the pre-replacement document
+      return this.applyAggregateProjection(
+        existingDoc as Record<string, unknown>,
+        projection as Record<string, unknown>
+      ) as T;
     } else {
-      // Upsert: insert the replacement
-      const result = await this.insertOne(replacement as Omit<T, '_id'> & { _id?: string });
+      // Upsert: insert the replacement. Carry _id from filter if it's a simple equality.
+      const filterRec = filter as Record<string, unknown>;
+      const filterId =
+        filterRec['_id'] !== undefined &&
+        filterRec['_id'] !== null &&
+        typeof filterRec['_id'] !== 'object'
+          ? (filterRec['_id'] as string)
+          : undefined;
+
+      const docToInsert = filterId
+        ? ({ ...replacement, _id: filterId } as Omit<T, '_id'> & { _id?: string })
+        : (replacement as Omit<T, '_id'> & { _id?: string });
+
+      const result = await this.insertOne(docToInsert);
+
       if (returnDocument === 'after') {
-        return this.findOne({ _id: result.insertedId } as Filter<T>);
+        const afterCursor = this.find({ _id: result.insertedId } as Filter<T>).limit(1);
+        if (projection) afterCursor.project(projection as Projection<T>);
+        const afterDocs = await afterCursor.toArray();
+        return afterDocs.length > 0 ? afterDocs[0] : null;
       }
       return null;
     }
@@ -1414,22 +1505,12 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async distinct(field: string, filter: Filter<T> = {}): Promise<unknown[]> {
     await this.ensureTable();
 
-    const paramsForWhere: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
-      filter,
-      paramsForWhere
-    );
-
-    const rows = await this.db.all<SQLiteRow>(
-      `SELECT _id, data FROM "${this.name}" WHERE ${whereClause}`,
-      paramsForWhere
-    );
+    const docs = await this.find(filter).toArray();
 
     const seen = new Set<string>();
     const results: unknown[] = [];
 
-    for (const row of rows) {
-      const doc = { _id: row._id, ...(safeJsonParse(row.data) as Record<string, unknown>) };
+    for (const doc of docs as Array<Record<string, unknown>>) {
       const value = this.getNestedValue(doc, field);
 
       if (Array.isArray(value)) {
@@ -1484,30 +1565,33 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   ): Promise<Record<string, unknown>[]> {
     let results: Record<string, unknown>[] = [];
 
-    // Start by fetching all documents (or use $match for initial SQL query)
-    const firstMatchStage = pipeline.find((stage) => '$match' in stage) as
-      | { $match: Filter<T> }
-      | undefined;
+    // Only push the initial $match down to SQL when it is the very first stage.
+    // Applying a $match that appears after other stages (e.g. after $unwind/$group) too
+    // early would change pipeline semantics.
+    const firstStage = pipeline[0];
+    const firstIsMatch = firstStage !== undefined && '$match' in firstStage;
 
-    if (firstMatchStage) {
-      const cursor = this.find(firstMatchStage.$match);
-      const docs = await cursor.toArray();
+    if (firstIsMatch) {
+      const matchFilter = (firstStage as { $match: Filter<T> }).$match;
+      const docs = await this.find(matchFilter).toArray();
       results = docs as Record<string, unknown>[];
     } else {
       const docs = await this.find({} as Filter<T>).toArray();
       results = docs as Record<string, unknown>[];
     }
 
-    for (const stage of pipeline) {
+    for (let i = 0; i < pipeline.length; i++) {
+      const stage = pipeline[i];
       const stageKey = Object.keys(stage)[0];
 
       switch (stageKey) {
         case '$match': {
-          // If this is the first stage and already applied above, skip; otherwise filter
-          if (stage !== firstMatchStage) {
-            const matchFilter = stage['$match'] as Filter<T>;
-            results = results.filter((doc) => this.matchesFilter(doc, matchFilter));
+          // Skip the first stage if it was already used for the initial SQL fetch
+          if (i === 0 && firstIsMatch) {
+            break;
           }
+          const matchFilter = stage['$match'] as Filter<T>;
+          results = results.filter((doc) => this.matchesFilter(doc, matchFilter));
           break;
         }
 
@@ -1618,7 +1702,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
             keyObj[k] = expr;
           }
         }
-        groupKey = JSON.stringify(keyObj);
+        groupKey = keyObj;
       } else {
         groupKey = idSpec;
       }

@@ -206,5 +206,36 @@ describe('MongoLiteCollection - Aggregate', () => {
       assert.strictEqual(results[0]['name'], 'Charlie');
       assert.strictEqual(results[1]['name'], 'Alice');
     });
+
+    it('should apply $match after $unwind (not as an initial SQL optimisation)', async () => {
+      // $unwind comes first, then $match — the $match must filter the unwound results,
+      // not be pushed down to the initial SQL fetch
+      const results = await collection
+        .aggregate([{ $unwind: '$tags' }, { $match: { tags: 'admin' } }])
+        .toArray();
+      // Alice has 'admin', Dave has 'admin' → 2 rows after unwind+match
+      assert.strictEqual(results.length, 2);
+      assert.ok((results as Array<Record<string, unknown>>).every((r) => r['tags'] === 'admin'));
+    });
+
+    it('should group with an object _id and return the object (not a JSON string)', async () => {
+      const results = await collection
+        .aggregate([
+          {
+            $group: {
+              _id: { category: '$category', active: '$active' },
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+      // Each _id should be an object, not a stringified JSON
+      for (const r of results as Array<Record<string, unknown>>) {
+        assert.strictEqual(typeof r['_id'], 'object', '_id should be an object');
+        assert.ok(r['_id'] !== null);
+        assert.ok('category' in (r['_id'] as object));
+        assert.ok('active' in (r['_id'] as object));
+      }
+    });
   });
 });

@@ -234,8 +234,8 @@ export class FindCursor<T extends DocumentWithId> {
         }
         return '1=1'; // Empty array, everything matches
       case '$options':
-        // Consumed by $regex handling in buildWhereClause; no separate SQL condition needed
-        return '1=1';
+        // Consumed by $regex handling in buildWhereClause; treat standalone $options as unsupported
+        return '1=0';
       case '$regex': {
         // When called from buildComparisonCondition directly (no $options context),
         // extract flags from a RegExp value if provided

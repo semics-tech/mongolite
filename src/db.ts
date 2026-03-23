@@ -66,7 +66,10 @@ export class SQLiteDB {
           this.db.pragma('journal_mode = WAL');
         }
 
-        // Register regexp UDF for $regex operator support
+        // Register regexp UDF for $regex operator support.
+        // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
+        // not validated for catastrophic backtracking (ReDoS) could block the event loop.
+        // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
         this.db.function(
           'regexp',
           { deterministic: true },
