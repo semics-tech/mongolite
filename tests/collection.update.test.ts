@@ -745,3 +745,246 @@ describe('MongoLiteCollection - Update Operations', () => {
     });
   });
 });
+
+describe('MongoLiteCollection - Extended Update Operators', () => {
+  interface ExtendedTestDoc extends DocumentWithId {
+    name: string;
+    value: number;
+    tags?: string[];
+    category?: string;
+    score?: number;
+    active?: boolean;
+    createdAt?: string;
+  }
+
+  let client: MongoLite;
+  let collection: MongoLiteCollection<ExtendedTestDoc>;
+
+  const testDocs: ExtendedTestDoc[] = [
+    {
+      _id: '1',
+      name: 'Alice',
+      value: 10,
+      tags: ['admin', 'user'],
+      category: 'A',
+      score: 85,
+      active: true,
+    },
+    { _id: '2', name: 'Bob', value: 20, tags: ['user'], category: 'B', score: 60, active: false },
+    {
+      _id: '3',
+      name: 'Charlie',
+      value: 30,
+      tags: ['user', 'mod'],
+      category: 'A',
+      score: 90,
+      active: true,
+    },
+    { _id: '4', name: 'Dave', value: 40, tags: ['admin'], category: 'C', score: 72, active: false },
+    { _id: '5', name: 'Eve', value: 50, tags: ['user'], category: 'B', score: 45, active: true },
+  ];
+
+  beforeEach(async () => {
+    client = new MongoLite(':memory:');
+    await client.connect();
+    collection = client.collection<ExtendedTestDoc>('extendedUpdateTest');
+    for (const doc of testDocs) {
+      await collection.insertOne(doc);
+    }
+  });
+
+  afterEach(async () => {
+    await client.close();
+  });
+
+  describe('$addToSet operator', () => {
+    it('should add an element to an array only if not already present', async () => {
+      await collection.updateOne({ _id: '1' }, { $addToSet: { tags: 'newTag' } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.ok(doc?.tags?.includes('newTag'));
+      assert.ok(doc?.tags?.includes('admin'));
+    });
+
+    it('should not add duplicate elements', async () => {
+      await collection.updateOne({ _id: '1' }, { $addToSet: { tags: 'admin' } });
+      const doc = await collection.findOne({ _id: '1' });
+      const adminCount = doc?.tags?.filter((t) => t === 'admin').length;
+      assert.strictEqual(adminCount, 1);
+    });
+
+    it('should create the array if the field does not exist', async () => {
+      await collection.updateOne({ _id: '1' }, { $unset: { tags: '' } });
+      await collection.updateOne({ _id: '1' }, { $addToSet: { tags: 'newTag' } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.deepStrictEqual(doc?.tags, ['newTag']);
+    });
+
+    it('should support the $each modifier', async () => {
+      await collection.updateOne(
+        { _id: '2' },
+        { $addToSet: { tags: { $each: ['x', 'y', 'user'] } } }
+      );
+      const doc = await collection.findOne({ _id: '2' });
+      assert.ok(doc?.tags?.includes('x'));
+      assert.ok(doc?.tags?.includes('y'));
+      // 'user' was already present; should not be duplicated
+      assert.strictEqual(doc?.tags?.filter((t) => t === 'user').length, 1);
+    });
+  });
+
+  describe('$pop operator', () => {
+    it('should remove the last element with $pop: 1', async () => {
+      await collection.updateOne({ _id: '1' }, { $pop: { tags: 1 } });
+      const doc = await collection.findOne({ _id: '1' });
+      // Alice originally has ['admin', 'user'] → remove last → ['admin']
+      assert.deepStrictEqual(doc?.tags, ['admin']);
+    });
+
+    it('should remove the first element with $pop: -1', async () => {
+      await collection.updateOne({ _id: '1' }, { $pop: { tags: -1 } });
+      const doc = await collection.findOne({ _id: '1' });
+      // Alice originally has ['admin', 'user'] → remove first → ['user']
+      assert.deepStrictEqual(doc?.tags, ['user']);
+    });
+
+    it('should work with updateMany', async () => {
+      await collection.updateMany({ category: 'A' }, { $pop: { tags: 1 } });
+      const alice = await collection.findOne({ _id: '1' });
+      const charlie = await collection.findOne({ _id: '3' });
+      assert.deepStrictEqual(alice?.tags, ['admin']);
+      assert.deepStrictEqual(charlie?.tags, ['user']);
+    });
+  });
+
+  describe('$mul operator', () => {
+    it('should multiply a numeric field by the given factor', async () => {
+      await collection.updateOne({ _id: '1' }, { $mul: { value: 2 } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.value, 20);
+    });
+
+    it('should set the field to 0 when multiplying a non-existent field', async () => {
+      await collection.updateOne({ _id: '1' }, { $mul: { score: 0 } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.score, 0);
+    });
+
+    it('should work with updateMany', async () => {
+      await collection.updateMany({ category: 'A' }, { $mul: { value: 10 } });
+      const alice = await collection.findOne({ _id: '1' });
+      const charlie = await collection.findOne({ _id: '3' });
+      assert.strictEqual(alice?.value, 100);
+      assert.strictEqual(charlie?.value, 300);
+    });
+  });
+
+  describe('$min operator', () => {
+    it('should update the field when the new value is lower', async () => {
+      await collection.updateOne({ _id: '1' }, { $min: { value: 5 } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.value, 5);
+    });
+
+    it('should not update the field when the existing value is already lower', async () => {
+      await collection.updateOne({ _id: '1' }, { $min: { value: 100 } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.value, 10);
+    });
+  });
+
+  describe('$max operator', () => {
+    it('should update the field when the new value is higher', async () => {
+      await collection.updateOne({ _id: '1' }, { $max: { value: 100 } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.value, 100);
+    });
+
+    it('should not update the field when the existing value is already higher', async () => {
+      await collection.updateOne({ _id: '1' }, { $max: { value: 5 } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.value, 10);
+    });
+  });
+
+  describe('$currentDate operator', () => {
+    it('should set a field to the current date as an ISO string', async () => {
+      const beforeUpdate = new Date();
+      await collection.updateOne({ _id: '1' }, { $currentDate: { createdAt: true } });
+      const doc = await collection.findOne({ _id: '1' });
+      assert.ok(doc?.createdAt, 'createdAt should be set');
+      const afterUpdate = new Date();
+      const setDate = new Date(doc!.createdAt!);
+      assert.ok(setDate >= beforeUpdate);
+      assert.ok(setDate <= afterUpdate);
+    });
+
+    it('should set a field to an ISO string when $type is "date"', async () => {
+      const beforeUpdate = new Date();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await collection.updateOne({ _id: '1' }, {
+        $currentDate: { createdAt: { $type: 'date' } },
+      } as any);
+      const doc = await collection.findOne({ _id: '1' });
+      assert.ok(doc?.createdAt, 'createdAt should be set');
+      const afterUpdate = new Date();
+      const setDate = new Date(doc!.createdAt!);
+      assert.ok(setDate >= beforeUpdate);
+      assert.ok(setDate <= afterUpdate);
+    });
+
+    it('should set a field to a numeric timestamp when $type is "timestamp"', async () => {
+      const beforeMs = Date.now();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await collection.updateOne({ _id: '1' }, {
+        $currentDate: { updatedAt: { $type: 'timestamp' } },
+      } as any);
+      const doc = await collection.findOne({ _id: '1' });
+      const afterMs = Date.now();
+      assert.ok(typeof doc?.updatedAt === 'number', 'updatedAt should be a numeric timestamp');
+      assert.ok((doc!.updatedAt as number) >= beforeMs);
+      assert.ok((doc!.updatedAt as number) <= afterMs);
+    });
+
+    it('should work with updateMany', async () => {
+      await collection.updateMany({ category: 'A' }, { $currentDate: { createdAt: true } });
+      const alice = await collection.findOne({ _id: '1' });
+      const charlie = await collection.findOne({ _id: '3' });
+      assert.ok(alice?.createdAt);
+      assert.ok(charlie?.createdAt);
+    });
+  });
+
+  describe('replaceOne()', () => {
+    it('should replace all fields of a matching document', async () => {
+      const result = await collection.replaceOne({ _id: '1' }, { name: 'Replaced', value: 0 });
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.matchedCount, 1);
+      assert.strictEqual(result.modifiedCount, 1);
+      assert.strictEqual(result.upsertedId, null);
+
+      const doc = await collection.findOne({ _id: '1' });
+      assert.strictEqual(doc?.name, 'Replaced');
+      assert.strictEqual(doc?.value, 0);
+      assert.strictEqual(doc?.category, undefined);
+    });
+
+    it('should return matchedCount 0 when no document matches', async () => {
+      const result = await collection.replaceOne({ _id: 'none' }, { name: 'X', value: 0 });
+      assert.strictEqual(result.matchedCount, 0);
+      assert.strictEqual(result.modifiedCount, 0);
+    });
+
+    it('should upsert when upsert: true and no document matches', async () => {
+      const result = await collection.replaceOne(
+        { _id: 'upserted' },
+        { name: 'Upserted', value: 999 },
+        { upsert: true }
+      );
+      assert.strictEqual(result.matchedCount, 0);
+      assert.ok(result.upsertedId);
+
+      const doc = await collection.findOne({ _id: result.upsertedId! });
+      assert.strictEqual(doc?.name, 'Upserted');
+    });
+  });
+});

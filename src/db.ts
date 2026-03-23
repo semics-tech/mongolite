@@ -66,6 +66,38 @@ export class SQLiteDB {
           this.db.pragma('journal_mode = WAL');
         }
 
+        // Register regexp UDF for $regex operator support.
+        // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
+        // not validated for catastrophic backtracking (ReDoS) could block the event loop.
+        // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
+        this.db.function(
+          'regexp',
+          { deterministic: true },
+          (pattern: unknown, value: unknown): number => {
+            if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
+            try {
+              return new RegExp(pattern).test(String(value)) ? 1 : 0;
+            } catch {
+              return 0;
+            }
+          }
+        );
+
+        // Register regexp_flags UDF for $regex with $options support
+        this.db.function(
+          'regexp_flags',
+          { deterministic: true },
+          (pattern: unknown, flags: unknown, value: unknown): number => {
+            if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
+            try {
+              const f = typeof flags === 'string' ? flags : '';
+              return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
+            } catch {
+              return 0;
+            }
+          }
+        );
+
         if (this.verbose) {
           console.log(`SQLite database opened: ${this.filePath}`);
         }

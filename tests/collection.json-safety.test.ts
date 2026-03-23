@@ -262,11 +262,11 @@ describe('MongoLiteCollection - JSON Safety', () => {
       ];
 
       const results = await collection.insertMany(docs);
-      assert.strictEqual(results.length, 3);
-      results.forEach((result) => {
-        assert.strictEqual(result.acknowledged, true);
-        assert.ok(result.insertedId);
-      });
+      assert.strictEqual(results.insertedCount, 3);
+      assert.strictEqual(results.acknowledged, true);
+      assert.ok(results.insertedIds[0]);
+      assert.ok(results.insertedIds[1]);
+      assert.ok(results.insertedIds[2]);
 
       // Verify all documents were inserted
       const count = await collection.find({}).count();

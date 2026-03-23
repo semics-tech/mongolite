@@ -5,6 +5,7 @@ import {
   Filter,
   UpdateFilter,
   InsertOneResult,
+  InsertManyResult,
   UpdateResult,
   DeleteResult,
   Projection,
@@ -14,6 +15,11 @@ import {
   CreateIndexResult,
   DropIndexResult,
   IndexInfo,
+  FindOneAndUpdateOptions,
+  FindOneAndDeleteOptions,
+  FindOneAndReplaceOptions,
+  ReplaceOptions,
+  AggregationPipeline,
 } from './types.js';
 import { FindCursor } from './cursors/findCursor.js';
 import { extractRawIndexColumns } from './utils/indexing.js';
@@ -274,26 +280,31 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * If any document does not have an `_id`, a UUID will be generated.
    * Uses batch insert with transactions for improved performance.
    * @param docs An array of documents to insert.
-   * @returns {Promise<InsertOneResult[]>} An array of results for each insert operation.
+   * @returns {Promise<InsertManyResult>} An object containing the outcome of all insert operations.
    * */
-  async insertMany(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertOneResult[]> {
+  async insertMany(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertManyResult> {
     await this.ensureTable(); // Ensure table exists before insert
 
     if (docs.length === 0) {
-      return [];
+      return { acknowledged: true, insertedCount: 0, insertedIds: {} };
     }
 
-    const results: InsertOneResult[] = [];
+    const insertedIds: { [key: number]: string } = {};
     const batchSize = 500; // Process in batches to avoid memory issues with very large datasets
+    let insertedCount = 0;
+    let index = 0;
 
     // Process documents in batches
     for (let i = 0; i < docs.length; i += batchSize) {
       const batch = docs.slice(i, i + batchSize);
       const batchResults = await this.insertBatch(batch);
-      results.push(...batchResults);
+      batchResults.forEach((res) => {
+        insertedIds[index++] = res.insertedId;
+      });
+      insertedCount += batchResults.length;
     }
 
-    return results;
+    return { acknowledged: true, insertedCount, insertedIds };
   }
 
   /**
@@ -560,6 +571,119 @@ export class MongoLiteCollection<T extends DocumentWithId> {
             }
           }
           break;
+
+        case '$addToSet':
+          for (const path in opArgs) {
+            const value = opArgs[path];
+            const currentValue = this.getNestedValue(currentDoc, path);
+            const arr: unknown[] = Array.isArray(currentValue) ? currentValue : [];
+            const items =
+              typeof value === 'object' && value !== null && '$each' in value && Array.isArray(value.$each)
+                ? value.$each
+                : [value];
+            let changed = false;
+            for (const item of items) {
+              const alreadyPresent = arr.some(
+                (el) => JSON.stringify(el) === JSON.stringify(item)
+              );
+              if (!alreadyPresent) {
+                arr.push(item);
+                changed = true;
+              }
+            }
+            if (changed || !Array.isArray(currentValue)) {
+              this.setNestedValue(currentDoc, path, arr);
+              modified = true;
+            }
+          }
+          break;
+
+        case '$pop':
+          for (const path in opArgs) {
+            const value = opArgs[path];
+            const currentValue = this.getNestedValue(currentDoc, path);
+            if (Array.isArray(currentValue) && currentValue.length > 0) {
+              if (value === 1) {
+                currentValue.pop();
+              } else if (value === -1) {
+                currentValue.shift();
+              }
+              this.setNestedValue(currentDoc, path, currentValue);
+              modified = true;
+            }
+          }
+          break;
+
+        case '$mul':
+          for (const path in opArgs) {
+            const value = opArgs[path];
+            if (typeof value === 'number') {
+              const currentValue = this.getNestedValue(currentDoc, path);
+              const numericCurrent = typeof currentValue === 'number' ? currentValue : 0;
+              this.setNestedValue(currentDoc, path, numericCurrent * value);
+              modified = true;
+            }
+          }
+          break;
+
+        case '$min':
+          for (const path in opArgs) {
+            const value = opArgs[path];
+            const currentValue = this.getNestedValue(currentDoc, path);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if (currentValue === undefined || (value as any) < (currentValue as any)) {
+              this.setNestedValue(currentDoc, path, value);
+              modified = true;
+            }
+          }
+          break;
+
+        case '$max':
+          for (const path in opArgs) {
+            const value = opArgs[path];
+            const currentValue = this.getNestedValue(currentDoc, path);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if (currentValue === undefined || (value as any) > (currentValue as any)) {
+              this.setNestedValue(currentDoc, path, value);
+              modified = true;
+            }
+          }
+          break;
+
+        case '$currentDate':
+          for (const path in opArgs) {
+            const value = opArgs[path as keyof typeof opArgs];
+
+            if (value === true) {
+              // Default: store as ISO string date
+              this.setNestedValue(currentDoc, path, new Date().toISOString());
+              modified = true;
+              continue;
+            }
+
+            if (value && typeof value === 'object' && '$type' in value) {
+              const typeValue = (value as { $type?: unknown }).$type;
+              if (typeValue === 'date') {
+                this.setNestedValue(currentDoc, path, new Date().toISOString());
+                modified = true;
+                continue;
+              }
+              if (typeValue === 'timestamp') {
+                // Represent timestamp as a numeric UNIX epoch in milliseconds
+                this.setNestedValue(currentDoc, path, Date.now());
+                modified = true;
+                continue;
+              }
+              throw new Error(
+                `Unsupported $currentDate $type value for path "${path}": ${JSON.stringify(typeValue)}`
+              );
+            }
+
+            throw new Error(
+              `Unsupported $currentDate value for path "${path}": ${JSON.stringify(value)}`
+            );
+          }
+          break;
       }
     }
 
@@ -705,7 +829,85 @@ export class MongoLiteCollection<T extends DocumentWithId> {
               }
             }
             break;
-          // Add other operators as needed
+          case '$addToSet':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              const currentValue = this.getNestedValue(currentDoc, path);
+              const arr: unknown[] = Array.isArray(currentValue) ? currentValue : [];
+              const items =
+                typeof value === 'object' && value !== null && '$each' in value && Array.isArray(value.$each)
+                  ? value.$each
+                  : [value];
+              let changed = false;
+              for (const item of items) {
+                const alreadyPresent = arr.some(
+                  (el) => JSON.stringify(el) === JSON.stringify(item)
+                );
+                if (!alreadyPresent) {
+                  arr.push(item);
+                  changed = true;
+                }
+              }
+              if (changed || !Array.isArray(currentValue)) {
+                this.setNestedValue(currentDoc, path, arr);
+                modified = true;
+              }
+            }
+            break;
+          case '$pop':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              const currentValue = this.getNestedValue(currentDoc, path);
+              if (Array.isArray(currentValue) && currentValue.length > 0) {
+                if (value === 1) {
+                  currentValue.pop();
+                } else if (value === -1) {
+                  currentValue.shift();
+                }
+                this.setNestedValue(currentDoc, path, currentValue);
+                modified = true;
+              }
+            }
+            break;
+          case '$mul':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              if (typeof value === 'number') {
+                const currentValue = this.getNestedValue(currentDoc, path);
+                const numericCurrent = typeof currentValue === 'number' ? currentValue : 0;
+                this.setNestedValue(currentDoc, path, numericCurrent * value);
+                modified = true;
+              }
+            }
+            break;
+          case '$min':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              const currentValue = this.getNestedValue(currentDoc, path);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if (currentValue === undefined || (value as any) < (currentValue as any)) {
+                this.setNestedValue(currentDoc, path, value);
+                modified = true;
+              }
+            }
+            break;
+          case '$max':
+            for (const path in opArgs) {
+              const value = opArgs[path];
+              const currentValue = this.getNestedValue(currentDoc, path);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if (currentValue === undefined || (value as any) > (currentValue as any)) {
+                this.setNestedValue(currentDoc, path, value);
+                modified = true;
+              }
+            }
+            break;
+          case '$currentDate':
+            for (const path in opArgs) {
+              this.setNestedValue(currentDoc, path, new Date().toISOString());
+              modified = true;
+            }
+            break;
           default:
             throw new Error(`Unsupported update operator: ${operator}`);
         }
@@ -1077,6 +1279,672 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     const result = await this.db.get<{ count: number }>(countSql, paramsForCount);
     return result?.count || 0;
+  }
+
+  /**
+   * Returns the number of documents in the collection.
+   * This is an estimate and may not reflect the exact count in concurrent environments.
+   * @returns {Promise<number>} The estimated count.
+   */
+  async estimatedDocumentCount(): Promise<number> {
+    await this.ensureTable();
+    const result = await this.db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM "${this.name}"`
+    );
+    return result?.count || 0;
+  }
+
+  /**
+   * Finds a single document matching the filter, applies the update, and returns the document.
+   * @param filter The selection criteria.
+   * @param update The modifications to apply.
+   * @param options Options including returnDocument ('before'|'after') and upsert.
+   * @returns {Promise<T | null>} The document before or after the update, or null.
+   */
+  async findOneAndUpdate(
+    filter: Filter<T>,
+    update: UpdateFilter<T>,
+    options: FindOneAndUpdateOptions<T> = {}
+  ): Promise<T | null> {
+    await this.ensureTable();
+    const { returnDocument = 'before', upsert = false, projection } = options;
+
+    // Fetch the target document without projection so we always have the _id
+    const idDocs = await this.find(filter).limit(1).toArray();
+    const existingFullDoc = idDocs.length > 0 ? (idDocs[0] as T & DocumentWithId) : null;
+    const existingId = existingFullDoc?._id;
+
+    if (!existingFullDoc && !upsert) {
+      return null;
+    }
+
+    // Update by _id when available to ensure we modify the exact document we found
+    const updateFilter: Filter<T> =
+      existingId !== undefined && existingId !== null
+        ? ({ _id: existingId } as Filter<T>)
+        : filter;
+
+    const updateResult = await this.updateOne(updateFilter, update, { upsert });
+
+    if (returnDocument === 'after') {
+      const targetId = updateResult.upsertedId ?? existingId;
+      if (!targetId) return null;
+      const afterCursor = this.find({ _id: targetId } as Filter<T>).limit(1);
+      if (projection) afterCursor.project(projection as Projection<T>);
+      const afterDocs = await afterCursor.toArray();
+      return afterDocs.length > 0 ? afterDocs[0] : null;
+    }
+
+    // returnDocument === 'before'
+    if (!existingFullDoc) {
+      // Upsert case where no original document existed
+      return null;
+    }
+
+    if (!projection) {
+      return existingFullDoc as T;
+    }
+
+    // Apply projection to the located document by _id
+    if (existingId === undefined || existingId === null) {
+      return null;
+    }
+    const beforeCursor = this.find({ _id: existingId } as Filter<T>).limit(1);
+    beforeCursor.project(projection as Projection<T>);
+    const beforeDocs = await beforeCursor.toArray();
+    return beforeDocs.length > 0 ? beforeDocs[0] : null;
+  }
+
+  /**
+   * Finds a single document matching the filter, deletes it, and returns it.
+   * @param filter The selection criteria.
+   * @param options Options including field projection.
+   * @returns {Promise<T | null>} The deleted document or null.
+   */
+  async findOneAndDelete(
+    filter: Filter<T>,
+    options: FindOneAndDeleteOptions<T> = {}
+  ): Promise<T | null> {
+    await this.ensureTable();
+    const { projection } = options;
+
+    // Fetch without projection to always have _id for the delete
+    const idDocs = await this.find(filter).limit(1).toArray();
+    const existingFullDoc = idDocs.length > 0 ? (idDocs[0] as T & DocumentWithId) : null;
+
+    if (!existingFullDoc) {
+      return null;
+    }
+
+    await this.deleteOne({ _id: existingFullDoc._id } as Filter<T>);
+
+    if (!projection) {
+      return existingFullDoc as T;
+    }
+
+    // Apply projection to the in-memory document
+    const projCursor = this.find({ _id: existingFullDoc._id } as Filter<T>).limit(1);
+    projCursor.project(projection as Projection<T>);
+    // Since we already deleted, apply projection manually from the full doc
+    const fullDocRec = existingFullDoc as Record<string, unknown>;
+    return this.applyAggregateProjection(
+      fullDocRec,
+      projection as Record<string, unknown>
+    ) as T;
+  }
+
+  /**
+   * Finds a single document matching the filter and replaces it entirely.
+   * @param filter The selection criteria.
+   * @param replacement The replacement document (replaces all fields except _id).
+   * @param options Options including returnDocument, upsert, and projection.
+   * @returns {Promise<T | null>} The document before or after the replacement, or null.
+   */
+  async findOneAndReplace(
+    filter: Filter<T>,
+    replacement: Omit<T, '_id'>,
+    options: FindOneAndReplaceOptions<T> = {}
+  ): Promise<T | null> {
+    await this.ensureTable();
+    const { returnDocument = 'before', upsert = false, projection } = options;
+
+    const existingDoc = await this.findOne(filter);
+
+    if (!existingDoc && !upsert) {
+      return null;
+    }
+
+    if (existingDoc) {
+      const docId = existingDoc._id!;
+      const newData = safeJsonStringify(replacement, `findOneAndReplace for ${docId}`);
+      await this.db.run(`UPDATE "${this.name}" SET data = ? WHERE _id = ?`, [newData, docId]);
+
+      if (returnDocument === 'after') {
+        const afterCursor = this.find({ _id: docId } as Filter<T>).limit(1);
+        if (projection) afterCursor.project(projection as Projection<T>);
+        const afterDocs = await afterCursor.toArray();
+        return afterDocs.length > 0 ? afterDocs[0] : null;
+      }
+
+      if (!projection) {
+        return existingDoc;
+      }
+      // Apply projection to the pre-replacement document
+      return this.applyAggregateProjection(
+        existingDoc as Record<string, unknown>,
+        projection as Record<string, unknown>
+      ) as T;
+    } else {
+      // Upsert: insert the replacement. Carry _id from filter if it's a simple equality.
+      const filterRec = filter as Record<string, unknown>;
+      const filterId =
+        filterRec['_id'] !== undefined &&
+        filterRec['_id'] !== null &&
+        typeof filterRec['_id'] !== 'object'
+          ? (filterRec['_id'] as string)
+          : undefined;
+
+      const docToInsert = filterId
+        ? ({ ...replacement, _id: filterId } as Omit<T, '_id'> & { _id?: string })
+        : (replacement as Omit<T, '_id'> & { _id?: string });
+
+      const result = await this.insertOne(docToInsert);
+
+      if (returnDocument === 'after') {
+        const afterCursor = this.find({ _id: result.insertedId } as Filter<T>).limit(1);
+        if (projection) afterCursor.project(projection as Projection<T>);
+        const afterDocs = await afterCursor.toArray();
+        return afterDocs.length > 0 ? afterDocs[0] : null;
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Replaces a single document matching the filter.
+   * @param filter The selection criteria.
+   * @param replacement The replacement document (replaces all fields except _id).
+   * @param options Options including upsert.
+   * @returns {Promise<UpdateResult>} An object describing the outcome.
+   */
+  async replaceOne(
+    filter: Filter<T>,
+    replacement: Omit<T, '_id'>,
+    options: ReplaceOptions = {}
+  ): Promise<UpdateResult> {
+    await this.ensureTable();
+    const { upsert = false } = options;
+
+    const existingDoc = await this.findOne(filter);
+
+    if (!existingDoc) {
+      if (!upsert) {
+        return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
+      }
+      const result = await this.insertOne(replacement as Omit<T, '_id'> & { _id?: string });
+      return {
+        acknowledged: true,
+        matchedCount: 0,
+        modifiedCount: 0,
+        upsertedId: result.insertedId,
+      };
+    }
+
+    const docId = existingDoc._id!;
+    const newData = safeJsonStringify(replacement, `replaceOne for ${docId}`);
+    await this.db.run(`UPDATE "${this.name}" SET data = ? WHERE _id = ?`, [newData, docId]);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1, upsertedId: null };
+  }
+
+  /**
+   * Returns distinct values for a field across all documents matching the filter.
+   * @param field The field to find distinct values for.
+   * @param filter Optional filter to narrow the documents.
+   * @returns {Promise<unknown[]>} An array of distinct values.
+   */
+  async distinct(field: string, filter: Filter<T> = {}): Promise<unknown[]> {
+    await this.ensureTable();
+
+    const docs = await this.find(filter).toArray();
+
+    const seen = new Set<string>();
+    const results: unknown[] = [];
+
+    for (const doc of docs as Array<Record<string, unknown>>) {
+      const value = this.getNestedValue(doc, field);
+
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const key = JSON.stringify(item);
+          if (!seen.has(key)) {
+            seen.add(key);
+            results.push(item);
+          }
+        }
+      } else if (value !== undefined) {
+        const key = JSON.stringify(value);
+        if (!seen.has(key)) {
+          seen.add(key);
+          results.push(value);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Drops the entire collection (table) from the database.
+   * @returns {Promise<void>}
+   */
+  async drop(): Promise<void> {
+    await this.db.exec(`DROP TABLE IF EXISTS "${this.name}"`);
+  }
+
+  /**
+   * Executes an aggregation pipeline on the collection.
+   * Supports: $match, $project, $sort, $limit, $skip, $count, $group, $unwind, $addFields.
+   * @param pipeline An array of pipeline stage documents.
+   * @returns An object with a toArray() method that returns the aggregation result.
+   */
+  aggregate(pipeline: AggregationPipeline): { toArray: () => Promise<Record<string, unknown>[]> } {
+    return {
+      toArray: async (): Promise<Record<string, unknown>[]> => {
+        await this.ensureTable();
+        return this.runAggregationPipeline(pipeline);
+      },
+    };
+  }
+
+  /**
+   * Runs an aggregation pipeline and returns results.
+   * @private
+   */
+  private async runAggregationPipeline(
+    pipeline: AggregationPipeline
+  ): Promise<Record<string, unknown>[]> {
+    let results: Record<string, unknown>[] = [];
+
+    // Only push the initial $match down to SQL when it is the very first stage.
+    // Applying a $match that appears after other stages (e.g. after $unwind/$group) too
+    // early would change pipeline semantics.
+    const firstStage = pipeline[0];
+    const firstIsMatch = firstStage !== undefined && '$match' in firstStage;
+
+    if (firstIsMatch) {
+      const matchFilter = (firstStage as { $match: Filter<T> }).$match;
+      const docs = await this.find(matchFilter).toArray();
+      results = docs as Record<string, unknown>[];
+    } else {
+      const docs = await this.find({} as Filter<T>).toArray();
+      results = docs as Record<string, unknown>[];
+    }
+
+    for (let i = 0; i < pipeline.length; i++) {
+      const stage = pipeline[i];
+      const stageKey = Object.keys(stage)[0];
+
+      switch (stageKey) {
+        case '$match': {
+          // Skip the first stage if it was already used for the initial SQL fetch
+          if (i === 0 && firstIsMatch) {
+            break;
+          }
+          const matchFilter = stage['$match'] as Filter<T>;
+          results = results.filter((doc) => this.matchesFilter(doc, matchFilter));
+          break;
+        }
+
+        case '$project': {
+          const projection = stage['$project'] as Record<string, unknown>;
+          results = results.map((doc) => this.applyAggregateProjection(doc, projection));
+          break;
+        }
+
+        case '$addFields': {
+          const fields = stage['$addFields'] as Record<string, unknown>;
+          results = results.map((doc) => ({ ...doc, ...fields }));
+          break;
+        }
+
+        case '$sort': {
+          const sortSpec = stage['$sort'] as Record<string, 1 | -1>;
+          results = results.sort((a, b) => {
+            for (const [field, order] of Object.entries(sortSpec)) {
+              const aVal = this.getNestedValue(a, field);
+              const bVal = this.getNestedValue(b, field);
+              if (aVal === bVal) continue;
+              if (aVal === null || aVal === undefined) return order;
+              if (bVal === null || bVal === undefined) return -order;
+              const cmp = aVal < bVal ? -1 : 1;
+              return cmp * order;
+            }
+            return 0;
+          });
+          break;
+        }
+
+        case '$limit': {
+          const limitCount = stage['$limit'] as number;
+          results = results.slice(0, limitCount);
+          break;
+        }
+
+        case '$skip': {
+          const skipCount = stage['$skip'] as number;
+          results = results.slice(skipCount);
+          break;
+        }
+
+        case '$count': {
+          const countField = stage['$count'] as string;
+          results = [{ [countField]: results.length }];
+          break;
+        }
+
+        case '$group': {
+          results = this.applyGroupStage(results, stage['$group'] as Record<string, unknown>);
+          break;
+        }
+
+        case '$unwind': {
+          const path =
+            typeof stage['$unwind'] === 'string'
+              ? stage['$unwind']
+              : (stage['$unwind'] as { path: string }).path;
+          const fieldName = path.startsWith('$') ? path.slice(1) : path;
+          const unwound: Record<string, unknown>[] = [];
+          for (const doc of results) {
+            const arrayVal = this.getNestedValue(doc, fieldName);
+            if (Array.isArray(arrayVal)) {
+              for (const item of arrayVal) {
+                const newDoc = { ...doc };
+                this.setNestedValue(newDoc, fieldName, item);
+                unwound.push(newDoc);
+              }
+            } else if (arrayVal !== undefined && arrayVal !== null) {
+              unwound.push(doc);
+            }
+          }
+          results = unwound;
+          break;
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Applies a $group pipeline stage.
+   * @private
+   */
+  private applyGroupStage(
+    docs: Record<string, unknown>[],
+    groupSpec: Record<string, unknown>
+  ): Record<string, unknown>[] {
+    const groups = new Map<string, Record<string, unknown>[]>();
+
+    const idSpec = groupSpec['_id'];
+
+    for (const doc of docs) {
+      let groupKey: unknown;
+      if (idSpec === null) {
+        groupKey = null;
+      } else if (typeof idSpec === 'string' && idSpec.startsWith('$')) {
+        groupKey = this.getNestedValue(doc, idSpec.slice(1));
+      } else if (typeof idSpec === 'object' && idSpec !== null) {
+        const keyObj: Record<string, unknown> = {};
+        for (const [k, expr] of Object.entries(idSpec as Record<string, unknown>)) {
+          if (typeof expr === 'string' && expr.startsWith('$')) {
+            keyObj[k] = this.getNestedValue(doc, expr.slice(1));
+          } else {
+            keyObj[k] = expr;
+          }
+        }
+        groupKey = keyObj;
+      } else {
+        groupKey = idSpec;
+      }
+
+      const keyStr = JSON.stringify(groupKey);
+      if (!groups.has(keyStr)) {
+        groups.set(keyStr, []);
+      }
+      groups.get(keyStr)!.push(doc);
+    }
+
+    const results: Record<string, unknown>[] = [];
+    for (const [keyStr, groupDocs] of groups) {
+      const groupResult: Record<string, unknown> = { _id: JSON.parse(keyStr) };
+
+      for (const [field, expr] of Object.entries(groupSpec)) {
+        if (field === '_id') continue;
+        if (typeof expr === 'object' && expr !== null) {
+          const aggOp = Object.keys(expr as object)[0];
+          const aggArg = (expr as Record<string, unknown>)[aggOp];
+
+          switch (aggOp) {
+            case '$sum': {
+              if (typeof aggArg === 'number') {
+                groupResult[field] = groupDocs.length * aggArg;
+              } else if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                groupResult[field] = groupDocs.reduce((sum, doc) => {
+                  const val = this.getNestedValue(doc, fieldName);
+                  return sum + (typeof val === 'number' ? val : 0);
+                }, 0);
+              }
+              break;
+            }
+            case '$avg': {
+              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                const nums = groupDocs
+                  .map((doc) => this.getNestedValue(doc, fieldName))
+                  .filter((v) => typeof v === 'number') as number[];
+                groupResult[field] = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+              }
+              break;
+            }
+            case '$min': {
+              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                const vals = groupDocs
+                  .map((doc) => this.getNestedValue(doc, fieldName))
+                  .filter((v) => v !== undefined && v !== null);
+                groupResult[field] = vals.length > 0 ? vals.reduce((a, b) => (a < b ? a : b)) : null;
+              }
+              break;
+            }
+            case '$max': {
+              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                const vals = groupDocs
+                  .map((doc) => this.getNestedValue(doc, fieldName))
+                  .filter((v) => v !== undefined && v !== null);
+                groupResult[field] = vals.length > 0 ? vals.reduce((a, b) => (a > b ? a : b)) : null;
+              }
+              break;
+            }
+            case '$push': {
+              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                groupResult[field] = groupDocs.map((doc) => this.getNestedValue(doc, fieldName));
+              } else {
+                groupResult[field] = groupDocs.map(() => aggArg);
+              }
+              break;
+            }
+            case '$first': {
+              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                groupResult[field] =
+                  groupDocs.length > 0 ? this.getNestedValue(groupDocs[0], fieldName) : null;
+              }
+              break;
+            }
+            case '$last': {
+              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
+                const fieldName = aggArg.slice(1);
+                groupResult[field] =
+                  groupDocs.length > 0
+                    ? this.getNestedValue(groupDocs[groupDocs.length - 1], fieldName)
+                    : null;
+              }
+              break;
+            }
+            case '$count': {
+              groupResult[field] = groupDocs.length;
+              break;
+            }
+          }
+        }
+      }
+
+      results.push(groupResult);
+    }
+
+    return results;
+  }
+
+  /**
+   * Applies a $project stage to a document.
+   * @private
+   */
+  private applyAggregateProjection(
+    doc: Record<string, unknown>,
+    projection: Record<string, unknown>
+  ): Record<string, unknown> {
+    const hasInclusion = Object.entries(projection).some(
+      ([k, v]) => k !== '_id' && (v === 1 || v === true)
+    );
+
+    if (hasInclusion) {
+      // Inclusion mode
+      const result: Record<string, unknown> = {};
+      if (projection['_id'] !== 0 && projection['_id'] !== false) {
+        result['_id'] = doc['_id'];
+      }
+      for (const [field, val] of Object.entries(projection)) {
+        if (val === 1 || val === true) {
+          result[field] = this.getNestedValue(doc, field);
+        } else if (typeof val === 'string' && val.startsWith('$')) {
+          result[field] = this.getNestedValue(doc, val.slice(1));
+        }
+      }
+      return result;
+    } else {
+      // Exclusion mode
+      const result = { ...doc };
+      for (const [field, val] of Object.entries(projection)) {
+        if (val === 0 || val === false) {
+          delete result[field];
+        }
+      }
+      return result;
+    }
+  }
+
+  /**
+   * Checks if a document matches a filter (for in-memory aggregation stages).
+   * Uses the same logic as FindCursor but applied in JavaScript.
+   * @private
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private matchesFilter(doc: Record<string, unknown>, filter: Filter<any>): boolean {
+    for (const [key, value] of Object.entries(filter)) {
+      if (key === '$and' && Array.isArray(value)) {
+        if (!value.every((f) => this.matchesFilter(doc, f))) return false;
+        continue;
+      }
+      if (key === '$or' && Array.isArray(value)) {
+        if (!value.some((f) => this.matchesFilter(doc, f))) return false;
+        continue;
+      }
+      if (key === '$nor' && Array.isArray(value)) {
+        if (value.some((f) => this.matchesFilter(doc, f))) return false;
+        continue;
+      }
+      if (key.startsWith('$')) continue;
+
+      const docValue = this.getNestedValue(doc, key);
+
+      if (typeof value === 'object' && value !== null && !(value instanceof RegExp) && !(value instanceof Date)) {
+        const ops = value as Record<string, unknown>;
+        const hasOps = Object.keys(ops).some((k) => k.startsWith('$'));
+        if (hasOps) {
+          if (!this.matchesOperators(docValue, ops)) return false;
+          continue;
+        }
+      }
+
+      // Simple equality (including Date comparison)
+      if (value instanceof Date) {
+        if (!(docValue instanceof Date) || docValue.getTime() !== value.getTime()) return false;
+      } else if (Array.isArray(docValue)) {
+        if (!docValue.some((el) => JSON.stringify(el) === JSON.stringify(value))) return false;
+      } else if (JSON.stringify(docValue) !== JSON.stringify(value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Checks if a value matches a set of query operators (for in-memory filtering).
+   * @private
+   */
+  private matchesOperators(docValue: unknown, ops: Record<string, unknown>): boolean {
+    for (const [op, opVal] of Object.entries(ops)) {
+      switch (op) {
+        case '$eq':
+          if (JSON.stringify(docValue) !== JSON.stringify(opVal)) return false;
+          break;
+        case '$ne':
+          if (JSON.stringify(docValue) === JSON.stringify(opVal)) return false;
+          break;
+        case '$gt':
+          if (!((docValue as number) > (opVal as number))) return false;
+          break;
+        case '$gte':
+          if (!((docValue as number) >= (opVal as number))) return false;
+          break;
+        case '$lt':
+          if (!((docValue as number) < (opVal as number))) return false;
+          break;
+        case '$lte':
+          if (!((docValue as number) <= (opVal as number))) return false;
+          break;
+        case '$in':
+          if (!Array.isArray(opVal)) return false;
+          if (Array.isArray(docValue)) {
+            if (!docValue.some((el) => (opVal as unknown[]).some((v) => JSON.stringify(el) === JSON.stringify(v)))) return false;
+          } else {
+            if (!(opVal as unknown[]).some((v) => JSON.stringify(v) === JSON.stringify(docValue))) return false;
+          }
+          break;
+        case '$nin':
+          if (!Array.isArray(opVal)) return false;
+          if ((opVal as unknown[]).some((v) => JSON.stringify(v) === JSON.stringify(docValue))) return false;
+          break;
+        case '$exists':
+          if (opVal && docValue === undefined) return false;
+          if (!opVal && docValue !== undefined) return false;
+          break;
+        case '$regex': {
+          const pattern = opVal instanceof RegExp ? opVal : new RegExp(opVal as string);
+          if (!pattern.test(String(docValue))) return false;
+          break;
+        }
+        case '$size':
+          if (!Array.isArray(docValue) || docValue.length !== (opVal as number)) return false;
+          break;
+        case '$options':
+          break; // consumed by $regex
+      }
+    }
+    return true;
   }
 
   /**
