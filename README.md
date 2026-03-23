@@ -37,24 +37,28 @@ npm install mongolite-ts
 ```typescript
 import { MongoLite } from 'mongolite-ts';
 
-const client = new MongoLite('./myapp.sqlite');
-// Use ':memory:' for an ephemeral in-memory database
+async function main() {
+  const client = new MongoLite('./myapp.sqlite');
+  // Use ':memory:' for an ephemeral in-memory database
 
-const users = client.collection('users');
+  const users = client.collection('users');
 
-// Insert
-const result = await users.insertOne({ name: 'Alice', age: 30 });
+  // Insert
+  const result = await users.insertOne({ name: 'Alice', age: 30 });
 
-// Find
-const user = await users.findOne({ name: 'Alice' });
+  // Find
+  const user = await users.findOne({ name: 'Alice' });
 
-// Update
-await users.updateOne({ name: 'Alice' }, { $set: { age: 31 } });
+  // Update
+  await users.updateOne({ name: 'Alice' }, { $set: { age: 31 } });
 
-// Delete
-await users.deleteOne({ name: 'Alice' });
+  // Delete
+  await users.deleteOne({ name: 'Alice' });
 
-await client.close();
+  await client.close();
+}
+
+main();
 ```
 
 ## Documentation

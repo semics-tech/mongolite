@@ -19,7 +19,7 @@ Explicitly opens the database connection. Operations will automatically connect 
 
 Closes the database connection.
 
-### `listCollections(): Promise<string[]>`
+### `listCollections(): { toArray: () => Promise<string[]> }`
 
 Lists all collections (tables) in the database.
 

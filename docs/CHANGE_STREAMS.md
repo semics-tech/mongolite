@@ -132,13 +132,17 @@ interface ChangeStreamDocument {
 
 ```typescript
 // Proper cleanup
+let changeStream;
+
 try {
-  const changeStream = collection.watch();
+  changeStream = collection.watch();
 
   // ... use change stream
 
 } finally {
-  changeStream.close();
-  await changeStream.cleanup(); // Remove triggers if needed
+  if (changeStream) {
+    changeStream.close();
+    await changeStream.cleanup(); // Remove triggers if needed
+  }
 }
 ```
