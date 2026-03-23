@@ -9,7 +9,6 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  id-token: write
 
 jobs:
   release:
@@ -27,7 +26,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
       - name: Install dependencies
@@ -39,7 +37,7 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Release
+      - name: Create release tag and changelog
         uses: cycjimmy/semantic-release-action@v4
         with:
           extra_plugins: |
@@ -47,4 +45,3 @@ jobs:
             @semantic-release/git@10
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
