@@ -19,6 +19,8 @@ export type {
   SqlStorageCursor,
   SqlStorageValue,
 } from './adapters/cloudflare.js';
+export { BrowserSqliteAdapter } from './adapters/browser.js';
+export type { SqlJsDatabase, SqlJsStatement } from './adapters/browser.js';
 
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 

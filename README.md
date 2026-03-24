@@ -99,6 +99,27 @@ await users.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
 
+### Browser (via sql.js)
+
+Requires [sql.js](https://www.npmjs.com/package/sql.js) (`npm install sql.js`).
+
+```typescript
+import initSqlJs from 'sql.js';
+import { MongoLite, BrowserSqliteAdapter } from 'mongolite-ts';
+
+const SQL = await initSqlJs({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/sql.js/dist/${file}`,
+});
+const sqlJsDb = new SQL.Database(); // in-memory; use OPFS/IndexedDB for persistence
+
+const client = new MongoLite(new BrowserSqliteAdapter(sqlJsDb));
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+console.log(await users.findOne({ name: 'Alice' }));
+await client.close();
+```
+
 ### Cloudflare Durable Objects
 
 ```typescript
