@@ -14,13 +14,26 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
-    # Only run after CI passes on master
+    # This prevents concurrent releases from clashing
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+
     steps:
+      - name: Generate Token
+        id: generate_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          # We use the App token here so 'git push' works with the App's identity
+          token: ${{ steps.generate_token.outputs.token }}
+          persist-credentials: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -44,4 +57,5 @@ jobs:
             @semantic-release/changelog@6
             @semantic-release/git@10
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Crucial: Use the App token here as well
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
