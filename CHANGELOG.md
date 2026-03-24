@@ -1,3 +1,10 @@
+## [0.7.2](https://github.com/semics-tech/mongolite/compare/v0.7.1...v0.7.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* trigger publish workflow on GitHub release published event ([#46](https://github.com/semics-tech/mongolite/issues/46)) ([4fffe04](https://github.com/semics-tech/mongolite/commit/4fffe0483b8310c5c91cda78d3c5f11efebe1cac))
+
 ## [0.7.1](https://github.com/semics-tech/mongolite/compare/v0.7.0...v0.7.1) (2026-03-24)
 
 
