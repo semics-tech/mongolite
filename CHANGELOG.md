@@ -1,3 +1,10 @@
+## [0.7.1](https://github.com/semics-tech/mongolite/compare/v0.7.0...v0.7.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* **ci:** repair publish workflow — broken action versions and missing npm auth ([#44](https://github.com/semics-tech/mongolite/issues/44)) ([8745bad](https://github.com/semics-tech/mongolite/commit/8745bad3cb1e27932faf6427b69ebe90944e793f))
+
 # [0.7.0](https://github.com/semics-tech/mongolite/compare/v0.6.2...v0.7.0) (2026-03-24)
 
 
