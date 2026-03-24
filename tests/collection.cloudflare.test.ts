@@ -172,11 +172,25 @@ describe('CloudflareDurableObjectAdapter', () => {
       assert.strictEqual(rows.length, 2);
     });
 
-    it('exec() handles multi-statement DDL separated by semicolons', async () => {
+    it('exec() executes a single statement including multi-line DDL', async () => {
+      await assert.doesNotReject(() =>
+        adapter.exec(`CREATE TABLE IF NOT EXISTS t1 (_id TEXT PRIMARY KEY, data TEXT)`)
+      );
+    });
+
+    it('exec() executes a CREATE TRIGGER statement with an internal semicolon', async () => {
+      await adapter.exec(`CREATE TABLE IF NOT EXISTS t_src (_id TEXT PRIMARY KEY, data TEXT)`);
+      await adapter.exec(`CREATE TABLE IF NOT EXISTS t_log (id INTEGER PRIMARY KEY, val TEXT)`);
+      // This trigger body contains a semicolon inside BEGIN...END — the old splitting
+      // logic would break it; the fixed implementation passes it through intact.
       await assert.doesNotReject(() =>
         adapter.exec(`
-          CREATE TABLE IF NOT EXISTS t1 (_id TEXT PRIMARY KEY, data TEXT);
-          CREATE TABLE IF NOT EXISTS t2 (_id TEXT PRIMARY KEY, data TEXT)
+          CREATE TRIGGER t_src_insert
+          AFTER INSERT ON t_src
+          FOR EACH ROW
+          BEGIN
+            INSERT INTO t_log (val) VALUES (NEW._id);
+          END
         `)
       );
     });
@@ -290,6 +304,74 @@ describe('CloudflareDurableObjectAdapter', () => {
 
       await db.close();
       sql.close();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Change Streams — exercises the CREATE TRIGGER path through the adapter
+  // -------------------------------------------------------------------------
+
+  // ChangeStream.setupChangeTracking() is async but started fire-and-forget
+  // from the constructor. Give it time to finish before making mutations.
+  const TRIGGER_SETUP_WAIT_MS = 300;
+
+  describe('watch() / Change Streams', () => {
+    it('observes an insert event via collection.watch()', async () => {
+      const stream = users.watch();
+
+      await new Promise((resolve) => setTimeout(resolve, TRIGGER_SETUP_WAIT_MS));
+
+      const eventPromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          stream.close();
+          reject(new Error('Timed out waiting for change stream event'));
+        }, 5000);
+
+        stream.on('change', (change) => {
+          clearTimeout(timeout);
+          try {
+            assert.strictEqual(change.operationType, 'insert');
+            assert.strictEqual(change.fullDocument?.name, 'WatchTest');
+          } finally {
+            stream.close();
+          }
+          resolve();
+        });
+      });
+
+      await users.insertOne({ _id: 'ws1', name: 'WatchTest', age: 10 });
+
+      await eventPromise;
+    });
+
+    it('observes an update event via collection.watch()', async () => {
+      await users.insertOne({ _id: 'ws2', name: 'UpdateWatch', age: 20 });
+
+      const stream = users.watch();
+
+      await new Promise((resolve) => setTimeout(resolve, TRIGGER_SETUP_WAIT_MS));
+
+      const eventPromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          stream.close();
+          reject(new Error('Timed out waiting for change stream update event'));
+        }, 5000);
+
+        stream.on('change', (change) => {
+          clearTimeout(timeout);
+          try {
+            assert.strictEqual(change.operationType, 'update');
+            assert.strictEqual(change.documentKey._id, 'ws2');
+          } finally {
+            stream.close();
+          }
+          resolve();
+        });
+      });
+
+      await users.updateOne({ _id: 'ws2' }, { $set: { age: 21 } });
+
+      await eventPromise;
     });
   });
 });

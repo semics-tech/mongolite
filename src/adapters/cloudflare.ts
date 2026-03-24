@@ -38,7 +38,7 @@ export interface SqlStorage {
  *
  * ```ts
  * import { DurableObject } from 'cloudflare:workers';
- * import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts';
+ * import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
  *
  * export class MyDurableObject extends DurableObject {
  *   private client: MongoLite;
@@ -119,20 +119,15 @@ export class CloudflareDurableObjectAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Executes one or more SQL statements (DDL, transactions, etc.).
-   * For multiple statements, each must be separated by a semicolon and executed
-   * individually — Cloudflare's `exec` handles one statement at a time.
+   * Executes a single SQL statement (DDL, transactions, etc.).
+   *
+   * Cloudflare's `SqlStorage.exec` only supports one statement at a time, and
+   * some valid statements (e.g. `CREATE TRIGGER ... BEGIN ...; ...; END;`)
+   * contain internal semicolons. Callers must therefore pass exactly one
+   * statement per call; this method will not attempt to split multi-statement
+   * SQL strings.
    */
   async exec(sql: string): Promise<void> {
-    // Cloudflare's exec processes one statement at a time. Split on ';' and
-    // run each non-empty statement individually.
-    const statements = sql
-      .split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
-    for (const statement of statements) {
-      this.sql.exec(statement);
-    }
+    this.sql.exec(sql);
   }
 }

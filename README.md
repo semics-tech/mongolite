@@ -124,7 +124,7 @@ await client.close();
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
-import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts';
+import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
 
 export class MyDurableObject extends DurableObject {
   private client: MongoLite;

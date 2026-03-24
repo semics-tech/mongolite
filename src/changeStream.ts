@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { IDatabaseAdapter } from './db.js';
+import type { IDatabaseAdapter } from './db.js';
 import { DocumentWithId, Filter } from './types.js';
 
 export type ChangeOperationType = 'insert' | 'update' | 'delete' | 'replace';

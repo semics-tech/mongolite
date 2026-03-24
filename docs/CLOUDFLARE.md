@@ -9,10 +9,15 @@ MongoLite interface so you can use the same MongoDB-like API you already know.
 
 - A Cloudflare Workers project with **SQLite-backed** Durable Objects enabled.
 - `mongolite-ts` installed as a dependency.
+- **Node.js compatibility enabled** in your Worker (`nodejs_compat` flag). The
+  `mongolite-ts/cloudflare` entry point re-exports `ChangeStream`, which depends on
+  Node's built-in `events` module. Cloudflare Workers require `nodejs_compat` to
+  polyfill this — even if you don't use change streams directly.
 
 ```jsonc
 // wrangler.jsonc
 {
+  "compatibility_flags": ["nodejs_compat"],
   "migrations": [
     {
       "tag": "v1",
@@ -32,7 +37,7 @@ npm install mongolite-ts
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
-import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts';
+import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
 
 interface User {
   _id?: string;
@@ -162,7 +167,7 @@ managed by the Durable Object runtime and does not need to be explicitly opened 
 ### `CloudflareDurableObjectAdapter`
 
 ```typescript
-import { CloudflareDurableObjectAdapter } from 'mongolite-ts';
+import { CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
 
 const adapter = new CloudflareDurableObjectAdapter(ctx.storage.sql);
 ```
@@ -177,7 +182,7 @@ implemented by the built-in `SQLiteDB` class.  You can use this interface to wri
 that works with both backends:
 
 ```typescript
-import { IDatabaseAdapter, MongoLite } from 'mongolite-ts';
+import { IDatabaseAdapter, MongoLite } from 'mongolite-ts/cloudflare';
 
 function createClient(adapter: IDatabaseAdapter): MongoLite {
   return new MongoLite(adapter);

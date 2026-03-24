@@ -1,5 +1,5 @@
 import { ObjectId } from 'bson';
-import { IDatabaseAdapter } from './db.js';
+import type { IDatabaseAdapter } from './db.js';
 import {
   DocumentWithId,
   Filter,

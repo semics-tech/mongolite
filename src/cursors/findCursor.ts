@@ -1,5 +1,5 @@
 import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../types.js';
-import { IDatabaseAdapter } from '../db.js';
+import type { IDatabaseAdapter } from '../db.js';
 
 /**
  * Safely parses JSON data with fallback mechanisms for malformed JSON.
