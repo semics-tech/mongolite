@@ -1,6 +1,19 @@
 import Database from 'better-sqlite3';
 import type { Statement } from 'better-sqlite3';
 
+/**
+ * Common interface for database adapters.
+ * Implement this interface to support different SQLite backends (e.g. better-sqlite3, Cloudflare Durable Objects).
+ */
+export interface IDatabaseAdapter {
+  connect(): Promise<void>;
+  run(sql: string, params?: unknown[]): Promise<{ lastID: number; changes: number }>;
+  get<T>(sql: string, params?: unknown[]): Promise<T | undefined>;
+  all<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  exec(sql: string): Promise<void>;
+  close(): Promise<void>;
+}
+
 export interface MongoLiteOptions {
   filePath: string;
   verbose?: boolean;
@@ -12,7 +25,7 @@ export interface MongoLiteOptions {
  * SQLiteDB class provides a wrapper around the better-sqlite3 library
  * to simplify database operations.
  */
-export class SQLiteDB {
+export class SQLiteDB implements IDatabaseAdapter {
   private db: Database.Database | null = null;
   private readonly filePath: string;
   private readonly verbose: boolean;

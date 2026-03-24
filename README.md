@@ -70,6 +70,7 @@ main();
 | [JSON Safety](./docs/JSON_SAFETY.md) | Document validation and corrupted data recovery |
 | [Query Debugger](./docs/DEBUGGER.md) | Interactive CLI for debugging queries and inspecting SQL |
 | [Benchmarks](./docs/BENCHMARKS.md) | Performance benchmarks and storage characteristics |
+| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object |
 
 ## Development
 

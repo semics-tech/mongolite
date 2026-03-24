@@ -1,4 +1,4 @@
-import { SQLiteDB, MongoLiteOptions as DBMongoLiteOptions } from './db.js';
+import { SQLiteDB, IDatabaseAdapter, MongoLiteOptions as DBMongoLiteOptions } from './db.js';
 import { MongoLiteCollection } from './collection.js';
 import { DocumentWithId } from './types.js';
 
@@ -10,6 +10,15 @@ export type {
   ChangeStreamOptions,
   ChangeOperationType,
 } from './changeStream.js';
+export type { IDatabaseAdapter } from './db.js';
+export {
+  CloudflareDurableObjectAdapter,
+} from './adapters/cloudflare.js';
+export type {
+  SqlStorage,
+  SqlStorageCursor,
+  SqlStorageValue,
+} from './adapters/cloudflare.js';
 
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 
@@ -18,22 +27,47 @@ type MongoLiteOptions = {
 };
 /**
  * MongoLite class is the main entry point for interacting with the SQLite-backed database.
+ *
+ * You can construct it with:
+ * - A file path string — uses the built-in `better-sqlite3` adapter.
+ * - A `MongoLiteClientOptions` object — uses the built-in adapter with options.
+ * - An `IDatabaseAdapter` instance — use a custom adapter such as
+ *   `CloudflareDurableObjectAdapter` for Cloudflare Durable Objects.
  */
 export class MongoLite {
-  private db: SQLiteDB;
+  private db: IDatabaseAdapter;
   private options: MongoLiteOptions;
 
   /**
    * Creates a new MongoLite client instance.
-   * @param dbPathOrOptions Path to the SQLite database file or an options object.
+   * @param dbPathOrOptions Path to the SQLite database file, an options object,
+   *                        or an `IDatabaseAdapter` for custom backends.
    */
-  constructor(dbPathOrOptions: string | MongoLiteClientOptions, options: MongoLiteOptions = {}) {
-    this.db = new SQLiteDB(dbPathOrOptions);
+  constructor(
+    dbPathOrOptions: string | MongoLiteClientOptions | IDatabaseAdapter,
+    options: MongoLiteOptions = {}
+  ) {
+    if (
+      typeof dbPathOrOptions === 'object' &&
+      'connect' in dbPathOrOptions &&
+      'run' in dbPathOrOptions &&
+      'get' in dbPathOrOptions &&
+      'all' in dbPathOrOptions &&
+      'exec' in dbPathOrOptions &&
+      'close' in dbPathOrOptions
+    ) {
+      // Custom adapter (e.g. CloudflareDurableObjectAdapter)
+      this.db = dbPathOrOptions as IDatabaseAdapter;
+    } else {
+      this.db = new SQLiteDB(dbPathOrOptions as string | MongoLiteClientOptions);
+    }
     this.options = options;
   }
 
   /**
-   * Connects to the SQLite database.
+   * Connects to the database.
+   * For the built-in SQLite adapter this opens the file.
+   * For custom adapters (e.g. Cloudflare) this is typically a no-op.
    * @returns {Promise<void>} A promise that resolves when connected.
    */
   async connect(): Promise<void> {
@@ -41,15 +75,16 @@ export class MongoLite {
   }
 
   /**
-   * Get the underlying SQLiteDB instance for advanced operations or testing.
-   * @returns {SQLiteDB} The SQLiteDB instance.
+   * Get the underlying database adapter instance.
+   * @returns {IDatabaseAdapter} The database adapter.
    */
-  get database(): SQLiteDB {
+  get database(): IDatabaseAdapter {
     return this.db;
   }
 
   /**
    * Closes the database connection.
+   * For custom adapters (e.g. Cloudflare) this is typically a no-op.
    */
   async close(): Promise<void> {
     return this.db.close();
