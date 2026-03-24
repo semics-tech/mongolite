@@ -1,9 +1,8 @@
 name: Publish Package
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   id-token: write  # Required for OIDC
@@ -24,3 +23,5 @@ jobs:
       - run: npm run build --if-present
       - run: npm test
       - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
