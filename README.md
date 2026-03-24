@@ -70,6 +70,81 @@ main();
 | [JSON Safety](./docs/JSON_SAFETY.md) | Document validation and corrupted data recovery |
 | [Query Debugger](./docs/DEBUGGER.md) | Interactive CLI for debugging queries and inspecting SQL |
 | [Benchmarks](./docs/BENCHMARKS.md) | Performance benchmarks and storage characteristics |
+| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object |
+
+## Backend Examples
+
+### SQLite file (Node.js / Bun)
+
+```typescript
+import { MongoLite } from 'mongolite-ts';
+
+const client = new MongoLite('./myapp.sqlite');
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+await client.close();
+```
+
+### In-memory (tests / ephemeral)
+
+```typescript
+import { MongoLite } from 'mongolite-ts';
+
+const client = new MongoLite(':memory:');
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+// Data is discarded when the process exits
+await client.close();
+```
+
+### Browser (via sql.js)
+
+Requires [sql.js](https://www.npmjs.com/package/sql.js) (`npm install sql.js`).
+
+```typescript
+import initSqlJs from 'sql.js';
+import { MongoLite, BrowserSqliteAdapter } from 'mongolite-ts';
+
+const SQL = await initSqlJs({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/sql.js/dist/${file}`,
+});
+const sqlJsDb = new SQL.Database(); // in-memory; use OPFS/IndexedDB for persistence
+
+const client = new MongoLite(new BrowserSqliteAdapter(sqlJsDb));
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+console.log(await users.findOne({ name: 'Alice' }));
+await client.close();
+```
+
+### Cloudflare Durable Objects
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
+
+export class MyDurableObject extends DurableObject {
+  private client: MongoLite;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Pass ctx.storage.sql — no file path needed
+    this.client = new MongoLite(new CloudflareDurableObjectAdapter(ctx.storage.sql));
+    ctx.blockConcurrencyWhile(() => this.client.collection('users').ensureTable());
+  }
+
+  async fetch(request: Request) {
+    const users = this.client.collection('users');
+    await users.insertOne({ name: 'Alice', age: 30 });
+    return Response.json(await users.findOne({ name: 'Alice' }));
+  }
+}
+```
+
+> See [docs/CLOUDFLARE.md](./docs/CLOUDFLARE.md) for the full guide, supported operations, and limitations.
 
 ## Development
 

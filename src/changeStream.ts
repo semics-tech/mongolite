@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { SQLiteDB } from './db.js';
+import type { IDatabaseAdapter } from './db.js';
 import { DocumentWithId, Filter } from './types.js';
 
 export type ChangeOperationType = 'insert' | 'update' | 'delete' | 'replace';
@@ -56,7 +56,7 @@ export class ChangeStream<T extends DocumentWithId = DocumentWithId> extends Eve
   private readonly maxBufferSize: number;
 
   constructor(
-    private readonly db: SQLiteDB,
+    private readonly db: IDatabaseAdapter,
     private readonly collectionName: string,
     private readonly options: ChangeStreamOptions<T> = {}
   ) {

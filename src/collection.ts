@@ -1,5 +1,5 @@
 import { ObjectId } from 'bson';
-import { SQLiteDB } from './db.js';
+import type { IDatabaseAdapter } from './db.js';
 import {
   DocumentWithId,
   Filter,
@@ -195,7 +195,7 @@ function validateDocumentForStorage(doc: unknown, path = 'root'): void {
  */
 export class MongoLiteCollection<T extends DocumentWithId> {
   constructor(
-    private db: SQLiteDB,
+    private db: IDatabaseAdapter,
     public readonly name: string,
     private readonly options: { verbose?: boolean } = {}
   ) {
