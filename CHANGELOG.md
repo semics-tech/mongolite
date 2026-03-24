@@ -1,3 +1,10 @@
+# [0.8.0](https://github.com/semics-tech/mongolite/compare/v0.7.2...v0.8.0) (2026-03-24)
+
+
+### Features
+
+* multi-backend adapter support — Cloudflare Durable Objects and Browser (sql.js) ([#43](https://github.com/semics-tech/mongolite/issues/43)) ([c44c051](https://github.com/semics-tech/mongolite/commit/c44c051e30faaae2469bced818d05aeb93d93312))
+
 ## [0.7.2](https://github.com/semics-tech/mongolite/compare/v0.7.1...v0.7.2) (2026-03-24)
 
 
