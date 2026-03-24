@@ -72,6 +72,59 @@ main();
 | [Benchmarks](./docs/BENCHMARKS.md) | Performance benchmarks and storage characteristics |
 | [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object |
 
+## Backend Examples
+
+### SQLite file (Node.js / Bun)
+
+```typescript
+import { MongoLite } from 'mongolite-ts';
+
+const client = new MongoLite('./myapp.sqlite');
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+await client.close();
+```
+
+### In-memory (tests / ephemeral)
+
+```typescript
+import { MongoLite } from 'mongolite-ts';
+
+const client = new MongoLite(':memory:');
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+// Data is discarded when the process exits
+await client.close();
+```
+
+### Cloudflare Durable Objects
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts';
+
+export class MyDurableObject extends DurableObject {
+  private client: MongoLite;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Pass ctx.storage.sql — no file path needed
+    this.client = new MongoLite(new CloudflareDurableObjectAdapter(ctx.storage.sql));
+    ctx.blockConcurrencyWhile(() => this.client.collection('users').ensureTable());
+  }
+
+  async fetch(request: Request) {
+    const users = this.client.collection('users');
+    await users.insertOne({ name: 'Alice', age: 30 });
+    return Response.json(await users.findOne({ name: 'Alice' }));
+  }
+}
+```
+
+> See [docs/CLOUDFLARE.md](./docs/CLOUDFLARE.md) for the full guide, supported operations, and limitations.
+
 ## Development
 
 ```bash
