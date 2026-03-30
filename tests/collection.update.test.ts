@@ -920,7 +920,7 @@ describe('MongoLiteCollection - Extended Update Operators', () => {
 
     it('should set a field to an ISO string when $type is "date"', async () => {
       const beforeUpdate = new Date();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       await collection.updateOne({ _id: '1' }, {
         $currentDate: { createdAt: { $type: 'date' } },
       } as any);
@@ -934,7 +934,7 @@ describe('MongoLiteCollection - Extended Update Operators', () => {
 
     it('should set a field to a numeric timestamp when $type is "timestamp"', async () => {
       const beforeMs = Date.now();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       await collection.updateOne({ _id: '1' }, {
         $currentDate: { updatedAt: { $type: 'timestamp' } },
       } as any);
