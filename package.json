@@ -54,7 +54,7 @@
   "homepage": "https://github.com/semics-tech/mongolite-ts#readme",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.5.0",
+    "@types/node": "^26.0.1",
     "@typescript-eslint/eslint-plugin": "^8.58.1",
     "@typescript-eslint/parser": "^8.58.1",
     "c8": "^11.0.0",
