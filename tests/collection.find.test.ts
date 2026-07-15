@@ -710,6 +710,7 @@ describe('MongoLiteCollection - Find Operations', () => {
       await complexAllCollection.insertMany(complexDocs);
     });
 
+    // TOOD integrate mongo client to see if we get the same results
     it('should test the complex $all query from the example', async () => {
       // Test the exact query structure from the "NOT WORKING" example
       const query = {
@@ -1023,6 +1024,274 @@ describe('MongoLiteCollection - Find Operations', () => {
       assert.strictEqual(docs.length, 2);
       assert.ok(docs.some((d) => d._id === 'doc1'));
       assert.ok(docs.some((d) => d._id === 'doc2'));
+    });
+  });
+
+  describe('$all, $and, $in operators with array and nested fields - Edge Cases', () => {
+    let client: MongoLite;
+    let collection: MongoLiteCollection<any>;
+
+    beforeEach(async () => {
+      client = new MongoLite(':memory:');
+      await client.connect();
+      collection = client.collection('testEdgeCases');
+
+      // Test data: array of objects with nested properties
+      await collection.insertMany([
+        {
+          _id: '1',
+          name: 'doc1',
+          items: [{ a: { test: 1 } }, { b: { test: 2 } }, { c: { test: 3 } }],
+          something: { a: 1, b: 2 },
+          key: [1, 2, 3],
+        },
+        {
+          _id: '2',
+          name: 'doc2',
+          items: [{ a: { test: 1 } }, { b: { test: 3 } }], // Missing b.test: 2
+          something: { a: 1, b: 3 },
+          key: [1, 4],
+        },
+        {
+          _id: '3',
+          name: 'doc3',
+          items: [{ a: { test: 1 } }, { b: { test: 2 } }, { d: { test: 4 } }],
+          something: { a: 2, b: 2 }, // a is 2, not 1
+          key: [5, 2, 3],
+        },
+        {
+          _id: '4',
+          name: 'doc4',
+          items: [{ b: { test: 2 } }, { c: { test: 3 } }], // Missing a.test: 1
+          something: { a: 1, b: 2 },
+          key: [1, 2],
+        },
+        {
+          _id: '5',
+          name: 'doc5',
+          items: [{ a: { test: 5 } }, { b: { test: 5 } }], // Different test values
+          something: { a: 5, b: 5 },
+          key: [5, 5],
+        },
+      ]);
+    });
+
+    afterEach(async () => {
+      await client.close();
+    });
+
+    describe('$all with array of objects', () => {
+      it('should match documents where array contains all specified objects', async () => {
+        // $all should match only if ALL specified elements are present
+        // [{a:{test:1}},{b:{test:2}}] means both must be present
+        const docs = await collection
+          .find({
+            items: {
+              $all: [{ a: { test: 1 } }, { b: { test: 2 } }],
+            },
+          })
+          .toArray();
+
+        // doc1 and doc3 have both items, but doc2 is missing b.test:2, doc4 is missing a.test:1
+        assert.strictEqual(docs.length, 2);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '3'));
+      });
+
+      it('should match documents where all array elements match regardless of order', async () => {
+        const docs = await collection
+          .find({
+            items: {
+              $all: [{ b: { test: 2 } }, { a: { test: 1 } }],
+            },
+          })
+          .toArray();
+
+        // Order should not matter for $all
+        assert.strictEqual(docs.length, 2);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '3'));
+      });
+
+      it('should not match documents missing any of the required elements in $all', async () => {
+        const docs = await collection
+          .find({
+            items: {
+              $all: [{ a: { test: 1 } }, { b: { test: 2 } }, { c: { test: 3 } }],
+            },
+          })
+          .toArray();
+
+        // Only doc1 has all three
+        assert.strictEqual(docs.length, 1);
+        assert.ok(docs.some((d) => d._id === '1'));
+      });
+    });
+
+    describe('$and with nested field paths', () => {
+      it('should match documents where multiple nested paths all meet conditions', async () => {
+        // [{'something.a':1},{'something.b':1}] means both something.a=1 AND something.b=1
+        // These can be in different array elements or same document fields
+        const docs = await collection
+          .find({
+            $and: [{ 'something.a': 1 }, { 'something.b': 2 }],
+          })
+          .toArray();
+
+        // doc1 has something.a=1 and something.b=2
+        // doc4 has something.a=1 and something.b=2
+        assert.strictEqual(docs.length, 2);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '4'));
+      });
+
+      it('should not match documents when one of the $and conditions fails', async () => {
+        const docs = await collection
+          .find({
+            $and: [{ 'something.a': 1 }, { 'something.b': 1 }],
+          })
+          .toArray();
+
+        // No document has both something.a=1 AND something.b=1
+        assert.strictEqual(docs.length, 0);
+      });
+
+      it('should match documents where all conditions in $and are satisfied', async () => {
+        const docs = await collection
+          .find({
+            $and: [{ 'something.a': 1 }, { 'something.b': { $gte: 2 } }],
+          })
+          .toArray();
+
+        // doc1, doc2, and doc4 all have something.a=1 and something.b>=2
+        assert.strictEqual(docs.length, 3);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '2'));
+        assert.ok(docs.some((d) => d._id === '4'));
+      });
+    });
+
+    describe('$in with array of objects', () => {
+      it('should match documents where array contains any of the specified objects', async () => {
+        // $in: [{a:{test:1}},{b:{test:2}}] means either {a:{test:1}} OR {b:{test:2}} must be present
+        const docs = await collection
+          .find({
+            items: {
+              $in: [{ a: { test: 1 } }, { b: { test: 2 } }],
+            },
+          })
+          .toArray();
+
+        // All docs except doc5 have either a.test:1 or b.test:2
+        assert.strictEqual(docs.length, 4);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '2'));
+        assert.ok(docs.some((d) => d._id === '3'));
+        assert.ok(docs.some((d) => d._id === '4'));
+      });
+
+      it('should match documents where array does not contain any specified objects', async () => {
+        const docs = await collection
+          .find({
+            items: {
+              $in: [{ a: { test: 5 } }, { b: { test: 5 } }],
+            },
+          })
+          .toArray();
+
+        // Only doc5 has either a.test:5 or b.test:5
+        assert.strictEqual(docs.length, 1);
+        assert.ok(docs.some((d) => d._id === '5'));
+      });
+    });
+
+    describe('$in with nested paths and scalar values', () => {
+      it('should match documents where nested path value is in the list', async () => {
+        // {'something.Key': {$in: [1,2,3]}} means something.Key can be 1 or 2 or 3
+        const docs = await collection
+          .find({
+            'something.a': {
+              $in: [1, 2],
+            },
+          })
+          .toArray();
+
+        // doc1, doc2, doc3, doc4 have something.a = 1 or 2
+        assert.strictEqual(docs.length, 4);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '2'));
+        assert.ok(docs.some((d) => d._id === '3'));
+        assert.ok(docs.some((d) => d._id === '4'));
+      });
+
+      it('should match documents where array field element is in the list', async () => {
+        // key: [1,2,3] and key: [1,4] should match $in: [1,2,3]
+        const docs = await collection
+          .find({
+            key: {
+              $in: [1, 2, 3],
+            },
+          })
+          .toArray();
+
+        // doc1, doc2, doc3, doc4 all have at least one value from [1,2,3] in key array
+        assert.strictEqual(docs.length, 4);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '2'));
+        assert.ok(docs.some((d) => d._id === '3'));
+        assert.ok(docs.some((d) => d._id === '4'));
+      });
+
+      it('should not match documents where array field has no value in the list', async () => {
+        const docs = await collection
+          .find({
+            key: {
+              $in: [10, 20, 30],
+            },
+          })
+          .toArray();
+
+        // No document has any value from [10,20,30] in key array
+        assert.strictEqual(docs.length, 0);
+      });
+    });
+
+    describe('Complex combinations', () => {
+      it('should handle $and with $in operator', async () => {
+        const docs = await collection
+          .find({
+            $and: [
+              { 'something.a': { $in: [1, 2] } },
+              { 'something.b': { $in: [2, 3] } },
+            ],
+          })
+          .toArray();
+
+        // doc1: a=1, b=2 ✓
+        // doc2: a=1, b=3 ✓
+        // doc3: a=2, b=2 ✓
+        // doc4: a=1, b=2 ✓
+        assert.strictEqual(docs.length, 4);
+      });
+
+      it('should handle $or with $in and scalar values', async () => {
+        const docs = await collection
+          .find({
+            $or: [{ 'something.a': { $in: [1] } }, { 'something.b': { $in: [5] } }],
+          })
+          .toArray();
+
+        // doc1: a=1 ✓
+        // doc2: a=1 ✓
+        // doc3: a=2, b=2 ✗ but no b=5 either
+        // doc4: a=1 ✓
+        // doc5: a=5, b=5 ✗ no a=1, but b=5 ✓
+        assert.strictEqual(docs.length, 4);
+        assert.ok(docs.some((d) => d._id === '1'));
+        assert.ok(docs.some((d) => d._id === '2'));
+        assert.ok(docs.some((d) => d._id === '4'));
+        assert.ok(docs.some((d) => d._id === '5'));
+      });
     });
   });
 });

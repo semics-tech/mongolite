@@ -72,6 +72,28 @@ function toSQLiteValue(value: unknown): unknown {
 }
 
 /**
+ * Returns true for values that json_extract() returns as a nested JSON structure
+ * (plain objects/arrays) rather than as an unwrapped scalar. Date instances are
+ * scalars from SQLite's point of view (stored as ISO strings), not nested objects.
+ */
+function isPlainObjectOrArray(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !(value instanceof Date);
+}
+
+/**
+ * Builds a comparable value for a `json_extract(...) = ?` condition against an
+ * array element. json_extract() unwraps scalar leaf values (strings, numbers,
+ * booleans, ISO date strings) but returns nested objects/arrays as JSON text, so
+ * only those need to be JSON-stringified for comparison.
+ */
+function toJsonExtractComparableValue(value: unknown): unknown {
+  if (isPlainObjectOrArray(value)) {
+    return JSON.stringify(value);
+  }
+  return toSQLiteValue(value);
+}
+
+/**
  * Helper function to recursively restore Date objects from JSON-parsed data.
  * Converts ISO date strings back to Date objects.
  * @param obj The object to process
@@ -422,11 +444,12 @@ export class FindCursor<T extends DocumentWithId> {
       if (Array.isArray(value) && value.length > 0) {
         const allConditions = value
           .map((item) => {
-            if (typeof item === 'object' && item !== null) {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item) && !(item instanceof Date)) {
               // For object elements, we need to check if any array element matches all properties
               const objectConditions: string[] = [];
               for (const [key, val] of Object.entries(item)) {
-                params.push(toSQLiteValue(val));
+                // For nested objects in arrays, we need to match the full object
+                params.push(toJsonExtractComparableValue(val));
                 objectConditions.push(`json_extract(json_each.value, '$.${key}') = ?`);
               }
               const condition = objectConditions.join(' AND ');
@@ -441,6 +464,45 @@ export class FindCursor<T extends DocumentWithId> {
         return `(${arrayTypeCheck} AND ${allConditions})`;
       }
       return '1=0'; // Empty $all array, nothing matches
+    } else if (operator === '$in') {
+      // Handle $in with array values that may contain objects or scalars
+      if (Array.isArray(value) && value.length > 0) {
+        const hasObjects = value.some(
+          (v) => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date)
+        );
+
+        if (hasObjects) {
+          // When $in has objects, match if any array element matches any of the objects
+          const orConditions = value
+            .map((item) => {
+              if (
+                typeof item === 'object' &&
+                item !== null &&
+                !Array.isArray(item) &&
+                !(item instanceof Date)
+              ) {
+                // For object elements in $in, check if array element matches all properties
+                const objectConditions: string[] = [];
+                for (const [key, val] of Object.entries(item)) {
+                  params.push(toJsonExtractComparableValue(val));
+                  objectConditions.push(`json_extract(json_each.value, '$.${key}') = ?`);
+                }
+                const condition = objectConditions.join(' AND ');
+                return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE ${condition})`;
+              } else {
+                // For scalar values
+                params.push(toSQLiteValue(item));
+                return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE json_each.value = ?)`;
+              }
+            })
+            .join(' OR ');
+          return `(${arrayTypeCheck} AND (${orConditions}))`;
+        } else {
+          // All scalar values - use the existing logic for scalar comparison
+          return this.buildArrayComparisonCondition(field, value, '$in', params);
+        }
+      }
+      return '1=0'; // Empty $in array, nothing matches
     } else if (operator === '$elemMatch') {
       let elemMatchSubquery = `EXISTS (
         SELECT 1 
@@ -590,8 +652,20 @@ export class FindCursor<T extends DocumentWithId> {
               const opConditions = Object.entries(ops)
                 .filter(([op]) => op !== '$options') // $options is consumed alongside $regex
                 .map(([op, opValue]) => {
-                  if (op === '$elemMatch' || op === '$all') {
-                    return this.buildArraySubquery(key, op, opValue, params);
+                  if (op === '$elemMatch' || op === '$all' || op === '$in') {
+                    // Check if $in has objects that need array subquery handling
+                    if (
+                      op === '$in' &&
+                      Array.isArray(opValue) &&
+                      opValue.some(
+                        (v) => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date)
+                      )
+                    ) {
+                      return this.buildArraySubquery(key, op, opValue, params);
+                    }
+                    if (op === '$elemMatch' || op === '$all') {
+                      return this.buildArraySubquery(key, op, opValue, params);
+                    }
                   }
                   if (op === '$regex') {
                     return this.buildRegexCondition(key, opValue, regexOptions, params);
