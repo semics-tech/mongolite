@@ -24,6 +24,8 @@ import {
 import { FindCursor } from './cursors/findCursor.js';
 import { extractRawIndexColumns } from './utils/indexing.js';
 import { ChangeStream, ChangeStreamOptions } from './changeStream.js';
+import { applyProjectionToDocument, resolveProjectionMode } from './utils/projection.js';
+import { evaluateOperators } from './utils/queryOperators.js';
 
 /**
  * Safely stringifies JSON data with validation and error handling.
@@ -1816,34 +1818,32 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     doc: Record<string, unknown>,
     projection: Record<string, unknown>
   ): Record<string, unknown> {
-    const hasInclusion = Object.entries(projection).some(
-      ([k, v]) => k !== '_id' && (v === 1 || v === true)
+    if (Object.keys(projection).length === 0) return doc;
+
+    // Computed/renamed fields (string values starting with '$') are aggregation-only semantics
+    // that plain find() projections don't have, so they're layered on top of the shared
+    // inclusion/exclusion mechanics rather than folded into it. They also count as an inclusion
+    // for mode-determination purposes, matching real $project behavior.
+    const modeInput: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(projection)) {
+      modeInput[key] = typeof value === 'string' && value.startsWith('$') ? 1 : value;
+    }
+    const mode = resolveProjectionMode(modeInput as unknown as Projection<DocumentWithId>);
+
+    const base = applyProjectionToDocument(
+      doc as DocumentWithId,
+      projection as unknown as Projection<DocumentWithId>
     );
 
-    if (hasInclusion) {
-      // Inclusion mode
-      const result: Record<string, unknown> = {};
-      if (projection['_id'] !== 0 && projection['_id'] !== false) {
-        result['_id'] = doc['_id'];
+    if (mode !== 'include') return base;
+
+    const result: Record<string, unknown> = { ...base };
+    for (const [field, val] of Object.entries(projection)) {
+      if (typeof val === 'string' && val.startsWith('$')) {
+        result[field] = this.getNestedValue(doc, val.slice(1));
       }
-      for (const [field, val] of Object.entries(projection)) {
-        if (val === 1 || val === true) {
-          result[field] = this.getNestedValue(doc, field);
-        } else if (typeof val === 'string' && val.startsWith('$')) {
-          result[field] = this.getNestedValue(doc, val.slice(1));
-        }
-      }
-      return result;
-    } else {
-      // Exclusion mode
-      const result = { ...doc };
-      for (const [field, val] of Object.entries(projection)) {
-        if (val === 0 || val === false) {
-          delete result[field];
-        }
-      }
-      return result;
     }
+    return result;
   }
 
   /**
@@ -1896,55 +1896,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @private
    */
   private matchesOperators(docValue: unknown, ops: Record<string, unknown>): boolean {
-    for (const [op, opVal] of Object.entries(ops)) {
-      switch (op) {
-        case '$eq':
-          if (JSON.stringify(docValue) !== JSON.stringify(opVal)) return false;
-          break;
-        case '$ne':
-          if (JSON.stringify(docValue) === JSON.stringify(opVal)) return false;
-          break;
-        case '$gt':
-          if (!((docValue as number) > (opVal as number))) return false;
-          break;
-        case '$gte':
-          if (!((docValue as number) >= (opVal as number))) return false;
-          break;
-        case '$lt':
-          if (!((docValue as number) < (opVal as number))) return false;
-          break;
-        case '$lte':
-          if (!((docValue as number) <= (opVal as number))) return false;
-          break;
-        case '$in':
-          if (!Array.isArray(opVal)) return false;
-          if (Array.isArray(docValue)) {
-            if (!docValue.some((el) => (opVal as unknown[]).some((v) => JSON.stringify(el) === JSON.stringify(v)))) return false;
-          } else {
-            if (!(opVal as unknown[]).some((v) => JSON.stringify(v) === JSON.stringify(docValue))) return false;
-          }
-          break;
-        case '$nin':
-          if (!Array.isArray(opVal)) return false;
-          if ((opVal as unknown[]).some((v) => JSON.stringify(v) === JSON.stringify(docValue))) return false;
-          break;
-        case '$exists':
-          if (opVal && docValue === undefined) return false;
-          if (!opVal && docValue !== undefined) return false;
-          break;
-        case '$regex': {
-          const pattern = opVal instanceof RegExp ? opVal : new RegExp(opVal as string);
-          if (!pattern.test(String(docValue))) return false;
-          break;
-        }
-        case '$size':
-          if (!Array.isArray(docValue) || docValue.length !== (opVal as number)) return false;
-          break;
-        case '$options':
-          break; // consumed by $regex
-      }
-    }
-    return true;
+    return evaluateOperators(docValue, ops);
   }
 
   /**

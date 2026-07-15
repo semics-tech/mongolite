@@ -1,5 +1,6 @@
 import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../types.js';
 import type { IDatabaseAdapter } from '../db.js';
+import { applyProjectionToDocument } from '../utils/projection.js';
 
 /**
  * Safely parses JSON data with fallback mechanisms for malformed JSON.
@@ -562,6 +563,45 @@ export class FindCursor<T extends DocumentWithId> {
     return conditions.length > 0 ? conditions.join(' AND ') : '1=1';
   }
 
+  /**
+   * Builds the SQL condition(s) for a set of operators applied to one field, e.g.
+   * `{ age: { $gt: 30, $lt: 50 } }`. Recurses for `$not`, so a negated operator set on the same
+   * field (`{ age: { $not: { $gt: 30 } } }`) gets wrapped in `NOT (...)` rather than falling
+   * through to buildComparisonCondition's unsupported-operator default.
+   */
+  private buildFieldOperatorConditions(
+    field: string,
+    ops: Record<string, unknown>,
+    params: unknown[]
+  ): string {
+    const regexOptions = ops['$options'];
+    return Object.entries(ops)
+      .filter(([op]) => op !== '$options') // $options is consumed alongside $regex
+      .map(([op, opValue]) => {
+        if (op === '$not') {
+          return `NOT (${this.buildFieldOperatorConditions(field, opValue as Record<string, unknown>, params)})`;
+        }
+        if (op === '$elemMatch' || op === '$all' || op === '$in') {
+          // Check if $in has objects that need array subquery handling
+          if (
+            op === '$in' &&
+            Array.isArray(opValue) &&
+            opValue.some((v) => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date))
+          ) {
+            return this.buildArraySubquery(field, op, opValue, params);
+          }
+          if (op === '$elemMatch' || op === '$all') {
+            return this.buildArraySubquery(field, op, opValue, params);
+          }
+        }
+        if (op === '$regex') {
+          return this.buildRegexCondition(field, opValue, regexOptions, params);
+        }
+        return this.buildComparisonCondition(field, op, opValue, params);
+      })
+      .join(' AND ');
+  }
+
   private buildWhereClause(filter: Filter<T>, params: unknown[]): string {
     const conditions: string[] = [];
 
@@ -645,35 +685,7 @@ export class FindCursor<T extends DocumentWithId> {
             const hasOperators = Object.keys(value).some((k) => k.startsWith('$'));
 
             if (hasOperators) {
-              // Handle operators for this field.
-              // Extract $options for use with $regex if both are present.
-              const ops = value as Record<string, unknown>;
-              const regexOptions = ops['$options'];
-              const opConditions = Object.entries(ops)
-                .filter(([op]) => op !== '$options') // $options is consumed alongside $regex
-                .map(([op, opValue]) => {
-                  if (op === '$elemMatch' || op === '$all' || op === '$in') {
-                    // Check if $in has objects that need array subquery handling
-                    if (
-                      op === '$in' &&
-                      Array.isArray(opValue) &&
-                      opValue.some(
-                        (v) => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date)
-                      )
-                    ) {
-                      return this.buildArraySubquery(key, op, opValue, params);
-                    }
-                    if (op === '$elemMatch' || op === '$all') {
-                      return this.buildArraySubquery(key, op, opValue, params);
-                    }
-                  }
-                  if (op === '$regex') {
-                    return this.buildRegexCondition(key, opValue, regexOptions, params);
-                  }
-                  return this.buildComparisonCondition(key, op, opValue, params);
-                })
-                .join(' AND ');
-              conditions.push(`(${opConditions})`);
+              conditions.push(`(${this.buildFieldOperatorConditions(key, value as Record<string, unknown>, params)})`);
             } else {
               // This is an object equality check (exact match)
               const jsonPath = this.parseJsonPath(key);
@@ -761,117 +773,7 @@ export class FindCursor<T extends DocumentWithId> {
    * @private
    */
   private applyProjection(doc: T): T {
-    if (!this.projectionFields || Object.keys(this.projectionFields).length === 0) return doc;
-
-    const projectedDoc: Partial<T> = {};
-    let includeMode = true; // true if any field is 1, false if any field is 0 (excluding _id)
-    let hasExplicitInclusion = false;
-
-    // Determine if it's an inclusion or exclusion projection
-    for (const key in this.projectionFields) {
-      if (key === '_id') continue;
-      if (
-        this.projectionFields[key as keyof T] === 1 ||
-        this.projectionFields[key as keyof T] === true
-      ) {
-        hasExplicitInclusion = true;
-        break;
-      }
-      if (
-        this.projectionFields[key as keyof T] === 0 ||
-        this.projectionFields[key as keyof T] === false
-      ) {
-        includeMode = false;
-        // No break here, need to check all for explicit inclusions if _id is also 0
-      }
-    }
-
-    if (
-      (this.projectionFields._id === 0 || this.projectionFields._id === false) &&
-      !hasExplicitInclusion
-    ) {
-      // If _id is excluded and no other fields are explicitly included,
-      // it's an exclusion projection where other fields are implicitly included.
-      includeMode = false;
-    } else if (hasExplicitInclusion) {
-      includeMode = true;
-    }
-
-    if (includeMode) {
-      // Inclusion mode
-      for (const key in this.projectionFields) {
-        if (
-          this.projectionFields[key as keyof T] === 1 ||
-          this.projectionFields[key as keyof T] === true
-        ) {
-          if (key.includes('.')) {
-            // Handle nested paths for inclusion (basic implementation)
-            const path = key.split('.');
-            let current = doc as Record<string, unknown>;
-            let target = projectedDoc as Record<string, unknown>;
-
-            // Navigate to the last parent in the path
-            for (let i = 0; i < path.length - 1; i++) {
-              const segment = path[i];
-              if (current[segment] === undefined || current[segment] === null) break;
-
-              if (target[segment] === undefined) {
-                target[segment] = {};
-              }
-
-              current = current[segment] as Record<string, unknown>;
-              target = target[segment] as Record<string, unknown>;
-            }
-
-            // Set the final property if we reached it
-            const lastSegment = path[path.length - 1];
-            if (current && current[lastSegment] !== undefined) {
-              target[lastSegment] = current[lastSegment];
-            }
-          } else if (key in doc) {
-            projectedDoc[key as keyof T] = doc[key as keyof T];
-          }
-        }
-      }
-      // _id is included by default in inclusion mode, unless explicitly excluded
-      if (this.projectionFields._id !== 0 && this.projectionFields._id !== false && '_id' in doc) {
-        projectedDoc._id = doc._id;
-      }
-    } else {
-      // Exclusion mode
-      Object.assign(projectedDoc, doc);
-      for (const key in this.projectionFields) {
-        if (
-          this.projectionFields[key as keyof T] === 0 ||
-          this.projectionFields[key as keyof T] === false
-        ) {
-          if (key.includes('.')) {
-            // Handle nested paths for exclusion (basic implementation)
-            const path = key.split('.');
-            let current = projectedDoc as Record<string, unknown>;
-
-            // Navigate to the parent of the property to exclude
-            for (let i = 0; i < path.length - 1; i++) {
-              const segment = path[i];
-              if (current[segment] === undefined) break;
-              current = current[segment] as Record<string, unknown>;
-            }
-
-            // Delete the final property if we reached its parent
-            const lastSegment = path[path.length - 1];
-            if (current && current[lastSegment] !== undefined) {
-              delete current[lastSegment];
-            }
-          } else {
-            delete projectedDoc[key as keyof T];
-          }
-        }
-      }
-    }
-    // Type assertion: We return T instead of Partial<T> for better developer experience.
-    // When no projection is used, this is accurate. When a projection is used, consumers
-    // should be aware that some fields may be undefined at runtime.
-    return projectedDoc as T;
+    return applyProjectionToDocument(doc, this.projectionFields);
   }
 
   /**
