@@ -10,7 +10,6 @@ updates:
     # Specify labels for pull requests
     labels:
       - "dependencies"
-      - "npm"
     # Set version updating strategy
     versioning-strategy: auto
     # Limit the number of open pull requests
@@ -46,7 +45,6 @@ updates:
       interval: "weekly"
     labels:
       - "dependencies"
-      - "github-actions"
     commit-message:
       prefix: "ci"
       include: "scope"

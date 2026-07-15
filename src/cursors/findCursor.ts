@@ -1,5 +1,5 @@
 import { DocumentWithId, Filter, SortCriteria, Projection, SQLiteRow } from '../types.js';
-import { SQLiteDB } from '../db.js';
+import type { IDatabaseAdapter } from '../db.js';
 
 /**
  * Safely parses JSON data with fallback mechanisms for malformed JSON.
@@ -124,7 +124,7 @@ export class FindCursor<T extends DocumentWithId> {
   private projectionFields: Projection<T> | null = null;
 
   constructor(
-    private db: SQLiteDB,
+    private db: IDatabaseAdapter,
     private collectionName: string,
     initialFilter: Filter<T>,
     private readonly options: { verbose?: boolean } = {}
@@ -287,8 +287,122 @@ export class FindCursor<T extends DocumentWithId> {
           return this.buildArrayComparisonCondition(field, value, '$nin', params, elementPrefix);
         }
         return '1=1'; // Empty array, everything matches
+      case '$options':
+        // Consumed by $regex handling in buildWhereClause; treat standalone $options as unsupported
+        return '1=0';
+      case '$regex': {
+        // When called from buildComparisonCondition directly (no $options context),
+        // extract flags from a RegExp value if provided
+        let src: string;
+        let flags = '';
+        if (value instanceof RegExp) {
+          src = value.source;
+          flags = value.flags;
+        } else if (typeof value === 'string') {
+          src = value;
+        } else {
+          return '1=0';
+        }
+        const textExpr = `CAST(${jsonPath} AS TEXT)`;
+        if (flags) {
+          params.push(src, flags);
+          return `regexp_flags(?, ?, ${textExpr}) = 1`;
+        } else {
+          params.push(src);
+          return `regexp(?, ${textExpr}) = 1`;
+        }
+      }
+      case '$size':
+        // Matches arrays with exactly N elements
+        params.push(value);
+        return `json_array_length(${jsonPath}) = ?`;
+      case '$type': {
+        // Map BSON type numbers/names to SQLite json_type() values
+        const mapBsonType = (bsonType: unknown): string[] => {
+          const typeMap: Record<string | number, string[]> = {
+            1: ['real', 'integer'],
+            2: ['text'],
+            3: ['object'],
+            4: ['array'],
+            8: ['true', 'false'],
+            9: ['text'],
+            10: ['null'],
+            16: ['integer'],
+            18: ['integer'],
+            double: ['real', 'integer'],
+            string: ['text'],
+            object: ['object'],
+            array: ['array'],
+            bool: ['true', 'false'],
+            boolean: ['true', 'false'],
+            date: ['text'],
+            null: ['null'],
+            int: ['integer'],
+            long: ['integer'],
+            number: ['real', 'integer'],
+          };
+          return typeMap[bsonType as string | number] ?? [];
+        };
+        const typeArgs = Array.isArray(value) ? value : [value];
+        const allSqlTypes = typeArgs.flatMap((t) => mapBsonType(t));
+        const uniqueTypes = [...new Set(allSqlTypes)];
+        if (uniqueTypes.length === 0) return '1=0';
+        // Use json_type(json, path) form which correctly identifies type of JSON values
+        const typePath =
+          elementPrefix === 'data'
+            ? `json_type(${elementPrefix}, '$.${field}')`
+            : `json_type(${elementPrefix}.value, '$.${field}')`;
+        const typeConds = uniqueTypes.map(() => `${typePath} = ?`).join(' OR ');
+        params.push(...uniqueTypes);
+        return uniqueTypes.length === 1 ? `${typePath} = ?` : `(${typeConds})`;
+      }
+      case '$mod': {
+        // Matches where field % divisor === remainder
+        if (Array.isArray(value) && value.length === 2) {
+          params.push(value[0], value[1]);
+          return `(CAST(${jsonPath} AS INTEGER) % ? = ?)`;
+        }
+        return '1=0';
+      }
       default:
         return '1=0'; // Unsupported operator
+    }
+  }
+
+  /**
+   * Builds a regex condition with optional flags from $options.
+   */
+  private buildRegexCondition(
+    field: string,
+    value: unknown,
+    options: unknown,
+    params: unknown[],
+    elementPrefix: string = 'data'
+  ): string {
+    let src: string;
+    let flags = typeof options === 'string' ? options : '';
+
+    if (value instanceof RegExp) {
+      src = value.source;
+      flags = value.flags || flags;
+    } else if (typeof value === 'string') {
+      src = value;
+    } else {
+      return '1=0';
+    }
+
+    const jsonPath =
+      elementPrefix === 'data'
+        ? `json_extract(${elementPrefix}, ${this.parseJsonPath(field)})`
+        : `json_extract(${elementPrefix}.value, '$.${field}')`;
+    const textExpr = `CAST(${jsonPath} AS TEXT)`;
+
+    if (flags) {
+      params.push(src, flags);
+      return `regexp_flags(?, ?, ${textExpr}) = 1`;
+    } else {
+      params.push(src);
+      return `regexp(?, ${textExpr}) = 1`;
     }
   }
 
@@ -461,16 +575,26 @@ export class FindCursor<T extends DocumentWithId> {
             const jsonPath = this.parseJsonPath(key);
             conditions.push(`json_extract(data, ${jsonPath}) = ?`);
             params.push(toSQLiteValue(value));
+          } else if (value instanceof RegExp) {
+            // Support bare RegExp values: { field: /pattern/i }
+            conditions.push(this.buildRegexCondition(key, value, value.flags, params));
           } else if (typeof value === 'object' && value !== null) {
             // Check if any key is an operator
             const hasOperators = Object.keys(value).some((k) => k.startsWith('$'));
 
             if (hasOperators) {
-              // Handle operators for this field
-              const opConditions = Object.entries(value)
+              // Handle operators for this field.
+              // Extract $options for use with $regex if both are present.
+              const ops = value as Record<string, unknown>;
+              const regexOptions = ops['$options'];
+              const opConditions = Object.entries(ops)
+                .filter(([op]) => op !== '$options') // $options is consumed alongside $regex
                 .map(([op, opValue]) => {
                   if (op === '$elemMatch' || op === '$all') {
                     return this.buildArraySubquery(key, op, opValue, params);
+                  }
+                  if (op === '$regex') {
+                    return this.buildRegexCondition(key, opValue, regexOptions, params);
                   }
                   return this.buildComparisonCondition(key, op, opValue, params);
                 })
@@ -545,13 +669,24 @@ export class FindCursor<T extends DocumentWithId> {
    * @param projection An object where keys are field names and values are 1 (include) or 0 (exclude).
    * `_id` is included by default unless explicitly excluded.
    * @returns The `FindCursor` instance for chaining.
+   * @remarks When using projections, the returned documents may have undefined fields at runtime,
+   * though the TypeScript type will still be `T`. Consumers should be aware that projected-out
+   * fields will be undefined.
    */
   public project(projection: Projection<T>): this {
     this.projectionFields = projection;
     return this;
   }
 
-  private applyProjection(doc: T): Partial<T> {
+  /**
+   * Applies projection to a document, returning only the specified fields.
+   * @param doc The full document to apply projection to
+   * @returns The projected document. When a projection is applied, some fields may be undefined
+   * at runtime despite the return type being `T`. This trade-off provides better developer
+   * experience for the common case (no projection) while maintaining type compatibility.
+   * @private
+   */
+  private applyProjection(doc: T): T {
     if (!this.projectionFields) return doc;
 
     const projectedDoc: Partial<T> = {};
@@ -659,14 +794,17 @@ export class FindCursor<T extends DocumentWithId> {
         }
       }
     }
-    return projectedDoc;
+    // Type assertion: We return T instead of Partial<T> for better developer experience.
+    // When no projection is used, this is accurate. When a projection is used, consumers
+    // should be aware that some fields may be undefined at runtime.
+    return projectedDoc as T;
   }
 
   /**
    * Executes the query and returns all matching documents as an array.
    * @returns A promise that resolves to an array of documents.
    */
-  public async toArray(): Promise<Partial<T>[]> {
+  public async toArray(): Promise<T[]> {
     let finalSql = this.queryParts.sql;
     const finalParams = [...this.queryParts.params];
 
@@ -712,7 +850,7 @@ export class FindCursor<T extends DocumentWithId> {
    *  @returns A promise that resolves to the first matching document or null if no matches are found.
    *  @throws Error if the query fails.
    */
-  public async first(): Promise<Partial<T> | null> {
+  public async first(): Promise<T | null> {
     const results = await this.limit(1).toArray();
     return results.length > 0 ? results[0] : null;
   }

@@ -325,3 +325,137 @@ describe('MongoLiteCollection - Query Operators Tests', () => {
     });
   });
 });
+
+describe('MongoLiteCollection - Advanced Query Operators', () => {
+  let client: MongoLite;
+  let collection: MongoLiteCollection<TestDoc>;
+
+  const testDocs: TestDoc[] = [
+    { _id: '1', name: 'Alice', value: 10, tags: ['admin', 'user'] },
+    { _id: '2', name: 'Bob', value: 20, tags: ['user'] },
+    { _id: '3', name: 'Charlie', value: 30, tags: ['user', 'mod'] },
+    { _id: '4', name: 'Dave', value: 40, tags: ['admin'] },
+    { _id: '5', name: 'Eve', value: 50, tags: ['user'] },
+  ];
+
+  beforeEach(async () => {
+    client = new MongoLite(':memory:');
+    await client.connect();
+    collection = client.collection<TestDoc>('advancedOpsTest');
+    for (const doc of testDocs) {
+      await collection.insertOne(doc);
+    }
+  });
+
+  afterEach(async () => {
+    await client.close();
+  });
+
+  describe('$regex operator', () => {
+    it('should match documents with a $regex pattern string', async () => {
+      const docs = await collection.find({ name: { $regex: '^A' } }).toArray();
+      assert.strictEqual(docs.length, 1);
+      assert.strictEqual(docs[0].name, 'Alice');
+    });
+
+    it('should match documents with $regex and $options for case-insensitive search', async () => {
+      const docs = await collection.find({ name: { $regex: 'alice', $options: 'i' } }).toArray();
+      assert.strictEqual(docs.length, 1);
+      assert.strictEqual(docs[0].name, 'Alice');
+    });
+
+    it('should match documents with a bare RegExp value', async () => {
+      const docs = await collection.find({ name: /^[AB]/ }).toArray();
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d.name === 'Alice'));
+      assert.ok(docs.some((d) => d.name === 'Bob'));
+    });
+
+    it('should match documents with a case-insensitive RegExp', async () => {
+      const docs = await collection.find({ name: /^eve$/i }).toArray();
+      assert.strictEqual(docs.length, 1);
+      assert.strictEqual(docs[0].name, 'Eve');
+    });
+
+    it('should return no results when the regex does not match', async () => {
+      const docs = await collection.find({ name: { $regex: '^Z' } }).toArray();
+      assert.strictEqual(docs.length, 0);
+    });
+
+    it('should work with $regex on nested fields', async () => {
+      await collection.insertOne({
+        _id: '99',
+        name: 'Test',
+        value: 99,
+        nested: { subValue: 'hello world' },
+      });
+      const docs = await collection.find({ 'nested.subValue': { $regex: 'hello' } }).toArray();
+      assert.strictEqual(docs.length, 1);
+      assert.strictEqual(docs[0]._id, '99');
+    });
+  });
+
+  describe('$size operator', () => {
+    it('should match documents where the array has exactly N elements', async () => {
+      const docs = await collection.find({ tags: { $size: 2 } }).toArray();
+      // Alice ['admin','user'] and Charlie ['user','mod'] both have 2 tags
+      assert.strictEqual(docs.length, 2);
+      assert.ok(docs.some((d) => d.name === 'Alice'));
+      assert.ok(docs.some((d) => d.name === 'Charlie'));
+    });
+
+    it('should match documents where the array has 1 element', async () => {
+      const docs = await collection.find({ tags: { $size: 1 } }).toArray();
+      // Bob, Dave, Eve each have 1 tag
+      assert.strictEqual(docs.length, 3);
+    });
+
+    it('should return no results when no array matches the given size', async () => {
+      const docs = await collection.find({ tags: { $size: 5 } }).toArray();
+      assert.strictEqual(docs.length, 0);
+    });
+  });
+
+  describe('$type operator', () => {
+    it('should match documents where the field is a string (BSON type 2)', async () => {
+      const docs = await collection.find({ name: { $type: 2 } }).toArray();
+      assert.strictEqual(docs.length, 5);
+    });
+
+    it('should match documents where the field is a string (type name "string")', async () => {
+      const docs = await collection.find({ name: { $type: 'string' } }).toArray();
+      assert.strictEqual(docs.length, 5);
+    });
+
+    it('should match documents where the field is a number (BSON type 1)', async () => {
+      const docs = await collection.find({ value: { $type: 1 } }).toArray();
+      assert.strictEqual(docs.length, 5);
+    });
+
+    it('should match documents where the field is an array (BSON type 4)', async () => {
+      const docs = await collection.find({ tags: { $type: 4 } }).toArray();
+      assert.strictEqual(docs.length, 5);
+    });
+  });
+
+  describe('$mod operator', () => {
+    it('should match documents where value % 2 === 0', async () => {
+      const docs = await collection.find({ value: { $mod: [2, 0] } }).toArray();
+      // 10, 20, 30, 40, 50 → all divisible by 2
+      assert.strictEqual(docs.length, 5);
+    });
+
+    it('should match documents where value % 3 === 0', async () => {
+      const docs = await collection.find({ value: { $mod: [3, 0] } }).toArray();
+      // Only 30 is divisible by 3
+      assert.strictEqual(docs.length, 1);
+      assert.strictEqual(docs[0].value, 30);
+    });
+
+    it('should match documents where value % 4 === 0', async () => {
+      const docs = await collection.find({ value: { $mod: [4, 0] } }).toArray();
+      // 20 and 40 are divisible by 4
+      assert.strictEqual(docs.length, 2);
+    });
+  });
+});

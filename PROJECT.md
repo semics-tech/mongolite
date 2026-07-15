@@ -58,7 +58,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }
 ```json
@@ -400,7 +400,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x] # Test against multiple Node.js versions
+        node-version: [20.x, 22.x, 24.x] # Test against multiple Node.js versions
 
     steps:
     - name: Checkout repository

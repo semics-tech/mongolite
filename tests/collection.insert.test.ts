@@ -248,4 +248,26 @@ describe('MongoLiteCollection - Insert Operations', () => {
       assert.strictEqual(retrieved.createdAt.toISOString(), testDate.toISOString());
     });
   });
+
+  describe('insertMany() result shape', () => {
+    it('should return InsertManyResult with insertedCount and insertedIds', async () => {
+      const result = await collection.insertMany([
+        { name: 'X', value: 1 },
+        { name: 'Y', value: 2 },
+        { name: 'Z', value: 3 },
+      ]);
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.insertedCount, 3);
+      assert.ok(result.insertedIds[0]);
+      assert.ok(result.insertedIds[1]);
+      assert.ok(result.insertedIds[2]);
+    });
+
+    it('should return empty InsertManyResult for an empty array', async () => {
+      const result = await collection.insertMany([]);
+      assert.strictEqual(result.acknowledged, true);
+      assert.strictEqual(result.insertedCount, 0);
+      assert.deepStrictEqual(result.insertedIds, {});
+    });
+  });
 });
