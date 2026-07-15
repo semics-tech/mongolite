@@ -1,3 +1,10 @@
+## [0.8.3](https://github.com/semics-tech/mongolite/compare/v0.8.2...v0.8.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* correct $in/$all matching for array fields with Date values and nested objects ([83af1e4](https://github.com/semics-tech/mongolite/commit/83af1e415d4d49cfe3e097a198896cc77b45c27c))
+
 ## [0.8.2](https://github.com/semics-tech/mongolite/compare/v0.8.1...v0.8.2) (2026-07-15)
 
 
