@@ -687,7 +687,7 @@ export class FindCursor<T extends DocumentWithId> {
    * @private
    */
   private applyProjection(doc: T): T {
-    if (!this.projectionFields) return doc;
+    if (!this.projectionFields || Object.keys(this.projectionFields).length === 0) return doc;
 
     const projectedDoc: Partial<T> = {};
     let includeMode = true; // true if any field is 1, false if any field is 0 (excluding _id)

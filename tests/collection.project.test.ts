@@ -129,9 +129,33 @@ describe('MongoLiteCollection - Projection Operations', () => {
       assert.strictEqual(doc!.name, 'Test User 1');
       assert.strictEqual(doc!.address.city, 'Test City 1');
     });
+
+    it('should treat an empty projection object as no restriction', async () => {
+      const doc = await collection.findOne({ _id: '1' }, {});
+
+      assert.strictEqual(doc!._id, '1');
+      assert.strictEqual(doc!.name, 'Test User 1');
+      assert.strictEqual(doc!.age, 30);
+      assert.strictEqual(doc!.email, 'test1@example.com');
+      assert.strictEqual(doc!.address.city, 'Test City 1');
+      assert.deepStrictEqual(doc!.tags, ['tag1', 'tag2']);
+    });
   });
 
   describe('find() with projection', () => {
+    it('should treat an empty projection object as no restriction', async () => {
+      const docs = await collection.find({}).project({}).toArray();
+
+      assert.strictEqual(docs.length, 2);
+      for (const doc of docs) {
+        assert.ok(doc._id);
+        assert.ok(doc.name);
+        assert.ok(doc.age);
+        assert.ok(doc.email);
+        assert.ok(doc.address.city);
+      }
+    });
+
     it('should apply projection to all returned documents', async () => {
       const docs = await collection.find({}).project({ name: 1, age: 1 }).toArray();
 
