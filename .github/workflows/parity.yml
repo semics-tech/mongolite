@@ -1,0 +1,37 @@
+name: MongoDB Parity
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  parity:
+    name: MongoDB Parity Tests
+    runs-on: ubuntu-latest
+
+    env:
+      MONGOMS_VERSION: '7.0.14'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Cache mongodb-memory-server binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run MongoDB parity tests
+        run: npm run test:parity

@@ -21,6 +21,21 @@ We use GitHub to host code, to track issues and feature requests, as well as acc
 5. Make sure your code lints.
 6. Issue that pull request!
 
+### Adding or changing query, projection, sort, update, or aggregation semantics
+
+If your PR adds or changes behavior for a query operator (`$eq`, `$in`, ...), a projection
+shape, sort behavior, an update operator (`$set`, `$push`, ...), or an aggregation stage
+(`$match`, `$project`, ...), you must, in addition to a normal unit test:
+
+1. Add or update a scenario in `tests/parity/scenarios/*.scenarios.ts` covering the new/changed
+   behavior.
+2. Run `npm run test:parity` locally and confirm mongolite-ts and a real MongoDB instance (via
+   `mongodb-memory-server`) return identical results.
+
+A hand-written unit test only checks that the code does what *you* believe MongoDB does — it
+can't catch a wrong mental model. A parity scenario checks it against the real thing. See
+`tests/parity/README.md` for how to add one.
+
 ### Any contributions you make will be under the MIT Software License
 
 When you submit code changes, your submissions are understood to be under the same [MIT License](http://choosealicense.com/licenses/mit/) that covers the project. Feel free to contact the maintainers if that's a concern.
