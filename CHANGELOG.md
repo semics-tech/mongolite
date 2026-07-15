@@ -1,3 +1,10 @@
+## [0.8.1](https://github.com/semics-tech/mongolite/compare/v0.8.0...v0.8.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* issues with $in filter ([e303174](https://github.com/semics-tech/mongolite/commit/e303174437d52af9dbae4b972e6eddb1ca2081cf))
+
 # [0.8.0](https://github.com/semics-tech/mongolite/compare/v0.7.2...v0.8.0) (2026-03-24)
 
 
