@@ -1,3 +1,5 @@
+## [0.8.4](https://github.com/semics-tech/mongolite/compare/v0.8.3...v0.8.4) (2026-07-15)
+
 ## [0.8.3](https://github.com/semics-tech/mongolite/compare/v0.8.2...v0.8.3) (2026-07-15)
 
 
