@@ -1,3 +1,10 @@
+## [0.8.2](https://github.com/semics-tech/mongolite/compare/v0.8.1...v0.8.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* treat empty projection object as no restriction ([4a9da0e](https://github.com/semics-tech/mongolite/commit/4a9da0ed0d5ef70d536e6c5031677d09f55d25aa))
+
 ## [0.8.1](https://github.com/semics-tech/mongolite/compare/v0.8.0...v0.8.1) (2026-07-15)
 
 
