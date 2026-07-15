@@ -1,5 +1,8 @@
 import { SQLiteDB, IDatabaseAdapter, MongoLiteOptions as DBMongoLiteOptions } from './db.js';
 import { MongoLite as MongoLiteBase, MongoLiteBaseOptions } from './mongo-client.js';
+import { MongoLiteCollection } from './collection.js';
+import { DocumentWithId } from './types.js';
+import { MongoDBSyncPlugin, MongoDBSyncOptions } from './plugins/mongodbSync.js';
 
 export { MongoLiteCollection } from './collection.js';
 export * from './types.js';
@@ -20,8 +23,13 @@ export type {
 } from './adapters/cloudflare.js';
 export { BrowserSqliteAdapter } from './adapters/browser.js';
 export type { SqlJsDatabase, SqlJsStatement } from './adapters/browser.js';
+export { MongoDBSyncPlugin, createMongoDBSyncPlugin } from './plugins/mongodbSync.js';
+export type { MongoDBSyncOptions, SyncResult } from './plugins/mongodbSync.js';
 
-export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
+export interface MongoLiteClientOptions extends DBMongoLiteOptions {
+  /** Optional MongoDB sync plugin configuration */
+  mongodbSync?: MongoDBSyncOptions;
+}
 
 /**
  * MongoLite class is the main entry point for interacting with the SQLite-backed database.
@@ -33,6 +41,8 @@ export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
  *   `CloudflareDurableObjectAdapter` for Cloudflare Durable Objects.
  */
 export class MongoLite extends MongoLiteBase {
+  private syncPlugin: MongoDBSyncPlugin | null = null;
+
   /**
    * Creates a new MongoLite client instance.
    * @param dbPathOrOptions Path to the SQLite database file, an options object,
@@ -42,7 +52,7 @@ export class MongoLite extends MongoLiteBase {
     dbPathOrOptions: string | MongoLiteClientOptions | IDatabaseAdapter,
     options: MongoLiteBaseOptions = {}
   ) {
-    if (
+    const isCustomAdapter =
       dbPathOrOptions &&
       typeof dbPathOrOptions === 'object' &&
       typeof (dbPathOrOptions as IDatabaseAdapter).connect === 'function' &&
@@ -50,12 +60,63 @@ export class MongoLite extends MongoLiteBase {
       typeof (dbPathOrOptions as IDatabaseAdapter).get === 'function' &&
       typeof (dbPathOrOptions as IDatabaseAdapter).all === 'function' &&
       typeof (dbPathOrOptions as IDatabaseAdapter).exec === 'function' &&
-      typeof (dbPathOrOptions as IDatabaseAdapter).close === 'function'
-    ) {
-      // Custom adapter (e.g. CloudflareDurableObjectAdapter)
-      super(dbPathOrOptions as IDatabaseAdapter, options);
-    } else {
-      super(new SQLiteDB(dbPathOrOptions as string | MongoLiteClientOptions), options);
+      typeof (dbPathOrOptions as IDatabaseAdapter).close === 'function';
+
+    // Custom adapter (e.g. CloudflareDurableObjectAdapter) vs. file path / options object
+    super(
+      isCustomAdapter
+        ? (dbPathOrOptions as IDatabaseAdapter)
+        : new SQLiteDB(dbPathOrOptions as string | MongoLiteClientOptions),
+      options
+    );
+
+    // Initialize sync plugin if configuration is provided
+    if (typeof dbPathOrOptions === 'object' && (dbPathOrOptions as MongoLiteClientOptions).mongodbSync) {
+      this.initializeSyncPlugin((dbPathOrOptions as MongoLiteClientOptions).mongodbSync!);
     }
+  }
+
+  /**
+   * Initialize the MongoDB sync plugin
+   */
+  private async initializeSyncPlugin(syncOptions: MongoDBSyncOptions): Promise<void> {
+    try {
+      const { createMongoDBSyncPlugin } = await import('./plugins/mongodbSync.js');
+      this.syncPlugin = await createMongoDBSyncPlugin(syncOptions);
+
+      if (this.options.verbose) {
+        console.log('MongoDB sync plugin initialized and connected');
+      }
+    } catch (error) {
+      console.error('Failed to initialize MongoDB sync plugin:', error);
+      // Continue without sync plugin rather than failing entirely
+    }
+  }
+
+  /**
+   * Get the sync plugin instance (if enabled)
+   */
+  get mongodbSync(): MongoDBSyncPlugin | null {
+    return this.syncPlugin;
+  }
+
+  /**
+   * Closes the database connection.
+   */
+  async close(): Promise<void> {
+    // Disconnect sync plugin first to ensure operations are flushed
+    if (this.syncPlugin) {
+      await this.syncPlugin.disconnect();
+    }
+    return super.close();
+  }
+
+  /**
+   * Gets a collection (table) in the database.
+   * @param name The name of the collection.
+   * @returns A MongoLiteCollection instance.
+   */
+  collection<T extends DocumentWithId = DocumentWithId>(name: string): MongoLiteCollection<T> {
+    return new MongoLiteCollection<T>(this.db, name, this.options, this.syncPlugin);
   }
 }

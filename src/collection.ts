@@ -24,6 +24,7 @@ import {
 import { FindCursor } from './cursors/findCursor.js';
 import { extractRawIndexColumns } from './utils/indexing.js';
 import { ChangeStream, ChangeStreamOptions } from './changeStream.js';
+import type { MongoDBSyncPlugin } from './plugins/mongodbSync.js';
 
 /**
  * Safely stringifies JSON data with validation and error handling.
@@ -197,7 +198,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   constructor(
     private db: IDatabaseAdapter,
     public readonly name: string,
-    private readonly options: { verbose?: boolean } = {}
+    private readonly options: { verbose?: boolean } = {},
+    private readonly syncPlugin: MongoDBSyncPlugin | null = null
   ) {
     this.ensureTable().catch((err) => {
       // This error should be handled or logged appropriately.
@@ -259,7 +261,19 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
     try {
       await this.db.run(sql, [docId, jsonData]);
-      return { acknowledged: true, insertedId: docId };
+      const result = { acknowledged: true, insertedId: docId };
+
+      // Call sync plugin hook if available
+      if (this.syncPlugin) {
+        try {
+          await this.syncPlugin.onInsert(this.name, doc, result);
+        } catch (syncError) {
+          // Log but don't fail the main operation
+          console.warn('MongoDB sync plugin error on insert:', syncError);
+        }
+      }
+
+      return result;
     } catch (error) {
       // Handle potential errors, e.g., unique constraint violation if _id already exists
       console.error(`Error inserting document into ${this.name}:`, error);
@@ -293,6 +307,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     const batchSize = 500; // Process in batches to avoid memory issues with very large datasets
     let insertedCount = 0;
     let index = 0;
+    const allResults: InsertOneResult[] = [];
 
     // Process documents in batches
     for (let i = 0; i < docs.length; i += batchSize) {
@@ -302,6 +317,24 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         insertedIds[index++] = res.insertedId;
       });
       insertedCount += batchResults.length;
+      allResults.push(...batchResults);
+    }
+
+    // Call sync plugin hook if available for successful inserts
+    if (this.syncPlugin && allResults.length > 0) {
+      try {
+        // Call onInsert for each successfully inserted document
+        for (let i = 0; i < allResults.length; i++) {
+          const result = allResults[i];
+          const originalDoc = docs[i];
+          if (result.acknowledged) {
+            await this.syncPlugin.onInsert(this.name, originalDoc, result);
+          }
+        }
+      } catch (syncError) {
+        // Log but don't fail the main operation
+        console.warn('MongoDB sync plugin error on insertMany:', syncError);
+      }
     }
 
     return { acknowledged: true, insertedCount, insertedIds };
@@ -708,12 +741,24 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         }
       }
 
-      return {
+      const result = {
         acknowledged: true,
         matchedCount: 1,
         modifiedCount: 1, // Since we found and modified exactly one document
         upsertedId: null,
       };
+
+      // Call sync plugin hook if available
+      if (this.syncPlugin) {
+        try {
+          await this.syncPlugin.onUpdate(this.name, filter, update, result);
+        } catch (syncError) {
+          // Log but don't fail the main operation
+          console.warn('MongoDB sync plugin error on update:', syncError);
+        }
+      }
+
+      return result;
     }
 
     return {
@@ -936,12 +981,24 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         }
       }
     }
-    return {
+    const result = {
       acknowledged: true,
       matchedCount: rowsToUpdate.length,
       modifiedCount: modifiedCount,
       upsertedId: null, // We don't support upsert yet
     };
+
+    // Call sync plugin hook if available (only if some documents were modified)
+    if (this.syncPlugin && modifiedCount > 0) {
+      try {
+        await this.syncPlugin.onUpdate(this.name, filter, update, result);
+      } catch (syncError) {
+        // Log but don't fail the main operation
+        console.warn('MongoDB sync plugin error on updateMany:', syncError);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -1223,7 +1280,19 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       }
     }
 
-    return { acknowledged: true, deletedCount: countResult?.count ? 1 : 0 };
+    const result = { acknowledged: true, deletedCount: countResult?.count ? 1 : 0 };
+
+    // Call sync plugin hook if available (only if a document was actually deleted)
+    if (this.syncPlugin && result.deletedCount > 0) {
+      try {
+        await this.syncPlugin.onDelete(this.name, filter, result);
+      } catch (syncError) {
+        // Log but don't fail the main operation
+        console.warn('MongoDB sync plugin error on deleteOne:', syncError);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -1259,7 +1328,19 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       }
     }
 
-    return { acknowledged: true, deletedCount: countResult ? countResult.count : 0 };
+    const result = { acknowledged: true, deletedCount: countResult ? countResult.count : 0 };
+
+    // Call sync plugin hook if available (only if documents were actually deleted)
+    if (this.syncPlugin && result.deletedCount > 0) {
+      try {
+        await this.syncPlugin.onDelete(this.name, filter, result);
+      } catch (syncError) {
+        // Log but don't fail the main operation
+        console.warn('MongoDB sync plugin error on deleteMany:', syncError);
+      }
+    }
+
+    return result;
   }
 
   /**
