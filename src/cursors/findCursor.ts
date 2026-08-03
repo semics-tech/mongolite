@@ -3,6 +3,12 @@ import type { IDatabaseAdapter } from '../db.js';
 import { applyProjectionToDocument } from '../utils/projection.js';
 
 /**
+ * Matches compiled clauses that invoke SQLite's json1 functions, which are the
+ * ones that throw on malformed JSON. See `buildGuardedWhereClause`.
+ */
+const JSON1_FUNCTION_PATTERN = /\bjson_(?:extract|each)\s*\(/i;
+
+/**
  * Safely parses JSON data with fallback mechanisms for malformed JSON.
  * @param jsonString The JSON string to parse
  * @param context Optional context for error messages and recovery
@@ -192,18 +198,19 @@ export class FindCursor<T extends DocumentWithId> {
 
     // For non-Date values, handle both array and non-array fields
     const arrayPath = this.parseJsonPath(field);
-    const isArrayCheck = `json_type(json_extract(${elementPrefix}, ${arrayPath})) = 'array'`;
+    const isArrayCheck = this.buildIsArrayCheck(elementPrefix, arrayPath);
+    const eachArg = this.buildJsonEachArg(elementPrefix, arrayPath);
     const placeholders = value.map(() => '?').join(',');
 
     let arrayCondition: string;
     let nonArrayCondition: string;
 
     if (operator === '$in') {
-      arrayCondition = `EXISTS (SELECT 1 FROM json_each(json_extract(${elementPrefix}, ${arrayPath})) WHERE json_each.value IN (${placeholders}))`;
+      arrayCondition = `EXISTS (SELECT 1 FROM json_each(${eachArg}) WHERE json_each.value IN (${placeholders}))`;
       nonArrayCondition = `(${jsonPath} IN (${placeholders}))`;
     } else {
       // $nin
-      arrayCondition = `NOT EXISTS (SELECT 1 FROM json_each(json_extract(${elementPrefix}, ${arrayPath})) WHERE json_each.value IN (${placeholders}))`;
+      arrayCondition = `NOT EXISTS (SELECT 1 FROM json_each(${eachArg}) WHERE json_each.value IN (${placeholders}))`;
       nonArrayCondition = `(${jsonPath} NOT IN (${placeholders}) OR ${jsonPath} IS NULL)`;
     }
 
@@ -213,8 +220,43 @@ export class FindCursor<T extends DocumentWithId> {
 
     return `(
       (${isArrayCheck} AND ${arrayCondition}) OR
-      (json_type(json_extract(${elementPrefix}, ${arrayPath})) != 'array' AND ${nonArrayCondition})
+      (${this.buildIsNotArrayCheck(elementPrefix, arrayPath)} AND ${nonArrayCondition})
     )`;
+  }
+
+  /**
+   * SQL testing whether the value at `arrayPath` is a JSON array.
+   *
+   * Uses `json_type`'s two-argument form. The one-argument form —
+   * `json_type(json_extract(root, path))` — re-parses the *extracted value* as
+   * JSON, which raises `malformed JSON` for any plain string field: for
+   * `{"role":"admin"}` `json_extract` yields the bare text `admin`, and
+   * `json_type('admin')` is not valid JSON. That made `$in`/`$nin`/`$all`/
+   * `$elemMatch` throw on every non-array field, on healthy data.
+   *
+   * The two-argument form also classifies correctly where the one-argument form
+   * lied: a string field holding `"[1,2]"` reported as `array` rather than `text`.
+   */
+  private buildIsArrayCheck(root: string, arrayPath: string): string {
+    return `(json_valid(${root}) AND json_type(${root}, ${arrayPath}) = 'array')`;
+  }
+
+  /** Negation of {@link buildIsArrayCheck}. */
+  private buildIsNotArrayCheck(root: string, arrayPath: string): string {
+    return `(json_valid(${root}) AND json_type(${root}, ${arrayPath}) != 'array')`;
+  }
+
+  /**
+   * Builds a safe argument for `json_each(...)`.
+   *
+   * SQLite evaluates a table-valued function inside a correlated subquery even
+   * when a preceding `AND` term (such as the is-array check) is false, so
+   * guarding *outside* the call isn't enough — `json_each('admin')` still runs
+   * and throws. The guard therefore has to live inside the argument: anything
+   * that isn't a valid JSON array becomes an empty array, which yields no rows.
+   */
+  private buildJsonEachArg(root: string, arrayPath: string): string {
+    return `CASE WHEN json_valid(${root}) AND json_type(${root}, ${arrayPath}) = 'array' THEN json_extract(${root}, ${arrayPath}) ELSE '[]' END`;
   }
 
   /**
@@ -439,7 +481,8 @@ export class FindCursor<T extends DocumentWithId> {
     params: unknown[]
   ): string {
     const arrayPath = this.parseJsonPath(field);
-    const arrayTypeCheck = `json_type(json_extract(data, ${arrayPath})) = 'array'`;
+    const arrayTypeCheck = this.buildIsArrayCheck('data', arrayPath);
+    const eachArg = this.buildJsonEachArg('data', arrayPath);
 
     if (operator === '$all') {
       if (Array.isArray(value) && value.length > 0) {
@@ -459,11 +502,11 @@ export class FindCursor<T extends DocumentWithId> {
                 objectConditions.push(`json_extract(json_each.value, '$.${key}') = ?`);
               }
               const condition = objectConditions.join(' AND ');
-              return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE ${condition})`;
+              return `EXISTS (SELECT 1 FROM json_each(${eachArg}) WHERE ${condition})`;
             } else {
               // For simple values, use direct comparison
               params.push(toSQLiteValue(item));
-              return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE json_each.value = ?)`;
+              return `EXISTS (SELECT 1 FROM json_each(${eachArg}) WHERE json_each.value = ?)`;
             }
           })
           .join(' AND ');
@@ -494,11 +537,11 @@ export class FindCursor<T extends DocumentWithId> {
                   objectConditions.push(`json_extract(json_each.value, '$.${key}') = ?`);
                 }
                 const condition = objectConditions.join(' AND ');
-                return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE ${condition})`;
+                return `EXISTS (SELECT 1 FROM json_each(${eachArg}) WHERE ${condition})`;
               } else {
                 // For scalar values
                 params.push(toSQLiteValue(item));
-                return `EXISTS (SELECT 1 FROM json_each(json_extract(data, ${arrayPath})) WHERE json_each.value = ?)`;
+                return `EXISTS (SELECT 1 FROM json_each(${eachArg}) WHERE json_each.value = ?)`;
               }
             })
             .join(' OR ');
@@ -512,7 +555,7 @@ export class FindCursor<T extends DocumentWithId> {
     } else if (operator === '$elemMatch') {
       let elemMatchSubquery = `EXISTS (
         SELECT 1 
-        FROM json_each(json_extract(data, ${arrayPath})) as array_elements 
+        FROM json_each(${eachArg}) as array_elements 
         WHERE `;
 
       if (typeof value === 'object' && value !== null) {
@@ -713,9 +756,43 @@ export class FindCursor<T extends DocumentWithId> {
     return conditions.length > 0 ? conditions.join(' AND ') : '1=1';
   }
 
+  /**
+   * Wraps a compiled WHERE clause so that a single corrupted row can't take out
+   * every filtered query on the collection.
+   *
+   * SQLite's json1 functions (`json_extract`, `json_each`) raise
+   * `SqliteError: malformed JSON` as soon as they evaluate a row whose `data`
+   * column isn't valid JSON — including rows that would never have matched the
+   * filter anyway. One bad document therefore fails *all* filtered reads against
+   * that collection, not just the ones that would have returned it.
+   *
+   * Prefixing with `json_valid(data)` lets SQLite short-circuit those rows before
+   * any json1 function touches them, so corruption degrades to "this document is
+   * missing from results" rather than "this collection is unqueryable". Use
+   * {@link MongoLiteCollection.findInvalidJson} to find and repair the offenders.
+   *
+   * Applied only at the top level, and only when json1 functions are genuinely
+   * present, both deliberately:
+   * - `$not`/`$nor` compile their sub-clauses into `NOT (...)`. A guard nested
+   *   inside one would invert to `NOT (0 AND …)` — making corrupt rows *match* a
+   *   negated filter.
+   * - An empty filter compiles to `1=1`, touches no json1 function, and so can't
+   *   throw. Leaving it unguarded keeps `deleteMany({})` able to purge corrupt
+   *   rows, which is the escape hatch for cleaning them up.
+   */
+  private buildGuardedWhereClause(filter: Filter<T>, params: unknown[]): string {
+    const whereClause = this.buildWhereClause(filter, params);
+
+    if (!JSON1_FUNCTION_PATTERN.test(whereClause)) {
+      return whereClause;
+    }
+
+    return `json_valid(data) AND (${whereClause})`;
+  }
+
   private buildSelectQuery(filter: Filter<T>): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
-    const whereClause = this.buildWhereClause(filter, params);
+    const whereClause = this.buildGuardedWhereClause(filter, params);
     const sql = `SELECT _id, data FROM "${this.collectionName}" WHERE ${whereClause}`;
 
     if (this.options.verbose) {

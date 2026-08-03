@@ -439,7 +439,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     // Find the document first (only one)
     const paramsForSelect: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
       filter,
       paramsForSelect
     );
@@ -580,14 +580,15 @@ export class MongoLiteCollection<T extends DocumentWithId> {
             const currentValue = this.getNestedValue(currentDoc, path);
             const arr: unknown[] = Array.isArray(currentValue) ? currentValue : [];
             const items =
-              typeof value === 'object' && value !== null && '$each' in value && Array.isArray(value.$each)
+              typeof value === 'object' &&
+              value !== null &&
+              '$each' in value &&
+              Array.isArray(value.$each)
                 ? value.$each
                 : [value];
             let changed = false;
             for (const item of items) {
-              const alreadyPresent = arr.some(
-                (el) => JSON.stringify(el) === JSON.stringify(item)
-              );
+              const alreadyPresent = arr.some((el) => JSON.stringify(el) === JSON.stringify(item));
               if (!alreadyPresent) {
                 arr.push(item);
                 changed = true;
@@ -735,7 +736,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async updateMany(filter: Filter<T>, update: UpdateFilter<T>): Promise<UpdateResult> {
     await this.ensureTable();
     const paramsForSelect: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
       filter,
       paramsForSelect
     );
@@ -837,7 +838,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
               const currentValue = this.getNestedValue(currentDoc, path);
               const arr: unknown[] = Array.isArray(currentValue) ? currentValue : [];
               const items =
-                typeof value === 'object' && value !== null && '$each' in value && Array.isArray(value.$each)
+                typeof value === 'object' &&
+                value !== null &&
+                '$each' in value &&
+                Array.isArray(value.$each)
                   ? value.$each
                   : [value];
               let changed = false;
@@ -1198,7 +1202,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     await this.ensureTable();
 
     const paramsForDelete: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
       filter,
       paramsForDelete
     );
@@ -1237,7 +1241,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     await this.ensureTable();
 
     const paramsForDelete: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
       filter,
       paramsForDelete
     );
@@ -1273,13 +1277,50 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     await this.ensureTable();
 
     const paramsForCount: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildWhereClause'](
+    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
       filter,
       paramsForCount
     );
     const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
 
     const result = await this.db.get<{ count: number }>(countSql, paramsForCount);
+    return result?.count || 0;
+  }
+
+  /**
+   * Finds rows whose stored `data` column is not valid JSON.
+   *
+   * Filtered queries deliberately skip these rows — see
+   * `FindCursor.buildGuardedWhereClause` — so that one corrupted document can't
+   * make the whole collection unqueryable. That keeps reads working, but it also
+   * means such rows quietly stop appearing in results. This is the way to find
+   * them so they can be repaired or deleted (`deleteOne({ _id })` works on them,
+   * since `_id` lookups don't go through json1 functions).
+   *
+   * Intended for integrity checks and ops tooling rather than hot paths: it scans
+   * the table and returns the raw column text, not parsed documents.
+   *
+   * @returns The `_id` and raw stored text of every invalid row.
+   */
+  async findInvalidJson(): Promise<{ _id: string; data: string }[]> {
+    await this.ensureTable();
+
+    return this.db.all<{ _id: string; data: string }>(
+      `SELECT _id, data FROM "${this.name}" WHERE json_valid(data) = 0`
+    );
+  }
+
+  /**
+   * Counts rows whose stored `data` column is not valid JSON.
+   * Cheap enough to run on a schedule as a health check.
+   * @see findInvalidJson
+   */
+  async countInvalidJson(): Promise<number> {
+    await this.ensureTable();
+
+    const result = await this.db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM "${this.name}" WHERE json_valid(data) = 0`
+    );
     return result?.count || 0;
   }
 
@@ -1322,9 +1363,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     // Update by _id when available to ensure we modify the exact document we found
     const updateFilter: Filter<T> =
-      existingId !== undefined && existingId !== null
-        ? ({ _id: existingId } as Filter<T>)
-        : filter;
+      existingId !== undefined && existingId !== null ? ({ _id: existingId } as Filter<T>) : filter;
 
     const updateResult = await this.updateOne(updateFilter, update, { upsert });
 
@@ -1389,10 +1428,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     projCursor.project(projection as Projection<T>);
     // Since we already deleted, apply projection manually from the full doc
     const fullDocRec = existingFullDoc as Record<string, unknown>;
-    return this.applyAggregateProjection(
-      fullDocRec,
-      projection as Record<string, unknown>
-    ) as T;
+    return this.applyAggregateProjection(fullDocRec, projection as Record<string, unknown>) as T;
   }
 
   /**
@@ -1745,7 +1781,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
                 const nums = groupDocs
                   .map((doc) => this.getNestedValue(doc, fieldName))
                   .filter((v) => typeof v === 'number') as number[];
-                groupResult[field] = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+                groupResult[field] =
+                  nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
               }
               break;
             }
@@ -1755,7 +1792,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
                 const vals = groupDocs
                   .map((doc) => this.getNestedValue(doc, fieldName))
                   .filter((v) => v !== undefined && v !== null);
-                groupResult[field] = vals.length > 0 ? vals.reduce((a, b) => (a < b ? a : b)) : null;
+                groupResult[field] =
+                  vals.length > 0 ? vals.reduce((a, b) => (a < b ? a : b)) : null;
               }
               break;
             }
@@ -1765,7 +1803,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
                 const vals = groupDocs
                   .map((doc) => this.getNestedValue(doc, fieldName))
                   .filter((v) => v !== undefined && v !== null);
-                groupResult[field] = vals.length > 0 ? vals.reduce((a, b) => (a > b ? a : b)) : null;
+                groupResult[field] =
+                  vals.length > 0 ? vals.reduce((a, b) => (a > b ? a : b)) : null;
               }
               break;
             }
@@ -1870,7 +1909,12 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
       const docValue = this.getNestedValue(doc, key);
 
-      if (typeof value === 'object' && value !== null && !(value instanceof RegExp) && !(value instanceof Date)) {
+      if (
+        typeof value === 'object' &&
+        value !== null &&
+        !(value instanceof RegExp) &&
+        !(value instanceof Date)
+      ) {
         const ops = value as Record<string, unknown>;
         const hasOps = Object.keys(ops).some((k) => k.startsWith('$'));
         if (hasOps) {

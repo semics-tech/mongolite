@@ -68,3 +68,40 @@ interface CorruptedDocument {
 ```
 
 This allows your application to detect and handle data integrity issues gracefully rather than throwing unexpected exceptions.
+
+## Corrupted Rows Don't Break Queries
+
+The marker above covers documents MongoLite *parses in JavaScript*. Filtered
+queries have a separate hazard: they compile to SQL using SQLite's json1
+functions (`json_extract`, `json_each`), and those raise `malformed JSON` as soon
+as they evaluate a row whose stored data isn't valid JSON — **including rows that
+could never have matched the filter**. Without a guard, one corrupted document
+makes every filtered read against that collection fail, so a single bad row is an
+outage for the whole collection.
+
+Compiled filters are therefore guarded with `json_valid(data)`. Corruption
+degrades to "that document is missing from results" instead of "this collection is
+unqueryable".
+
+Two consequences worth knowing:
+
+- **Unfiltered reads still surface corrupt rows**, in the degraded marker form
+  above. `find({})` doesn't invoke any json1 function, so there's nothing to
+  guard against — and leaving it unguarded keeps `deleteMany({})` able to purge
+  corrupt rows.
+- **Skipped rows are quiet.** Reads keep working, which also means corruption
+  stops announcing itself.
+
+### Finding and repairing corrupt rows
+
+```typescript
+const invalid = await collection.findInvalidJson();
+// [{ _id: 'abc', data: '{"name":"broken",' }]
+
+for (const row of invalid) {
+  await collection.deleteOne({ _id: row._id }); // _id lookups bypass json1
+}
+
+// Cheap enough to run as a scheduled health check:
+const badRows = await collection.countInvalidJson();
+```
