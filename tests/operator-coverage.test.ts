@@ -45,6 +45,19 @@ const cases: OperatorCase[] = [
   { op: '$lte', description: '$lte matches lesser-or-equal values', filter: { n: { $lte: 10 } }, expectedIds: ['1'] },
   { op: '$in', description: '$in matches any listed value', filter: { n: { $in: [10, 15] } }, expectedIds: ['1', '3'] },
   { op: '$nin', description: '$nin excludes listed values', filter: { n: { $nin: [10, 15] } }, expectedIds: ['2'] },
+  // Regression for a bug where the SQL path silently excluded documents missing the field
+  // entirely (as opposed to holding it as an explicit `null`): json_type() returns SQL NULL
+  // for a path that doesn't exist, and `NULL != 'array'` is itself NULL, not TRUE, so the
+  // "field is not an array" branch never ran and the accompanying `... IS NULL` fallback that
+  // was supposed to catch this case never got the chance to. Docs '2' and '3' have no `opt`
+  // key at all (see fixture above) — distinct from `mixed: null` on doc '3', which already
+  // worked because json_type() returns the string 'null' for an explicit null, not SQL NULL.
+  {
+    op: '$nin',
+    description: '$nin also matches documents missing the field entirely',
+    filter: { opt: { $nin: ['present'] } },
+    expectedIds: ['2', '3'],
+  },
   { op: '$all', description: '$all requires every listed element present', filter: { tags: { $all: ['a', 'b'] } }, expectedIds: ['1'] },
   { op: '$exists', description: '$exists matches documents with the field present', filter: { opt: { $exists: true } }, expectedIds: ['1'] },
   { op: '$not', description: '$not negates a nested operator', filter: { n: { $not: { $gt: 10 } } }, expectedIds: ['1'] },
