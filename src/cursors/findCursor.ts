@@ -241,9 +241,16 @@ export class FindCursor<T extends DocumentWithId> {
     return `(json_valid(${root}) AND json_type(${root}, ${arrayPath}) = 'array')`;
   }
 
-  /** Negation of {@link buildIsArrayCheck}. */
+  /**
+   * Negation of {@link buildIsArrayCheck} — but not just `!=`. When `arrayPath` doesn't exist
+   * in the document, `json_type` returns SQL NULL, and `NULL != 'array'` is itself NULL (falsy),
+   * not TRUE. That silently dropped missing-field documents from the "not array" branch of
+   * $in/$nin/$all, even though they're exactly the case `IS NULL` handling downstream expects to
+   * see. `IS NOT` treats NULL as distinct from 'array', so missing fields correctly count as
+   * "not an array" here.
+   */
   private buildIsNotArrayCheck(root: string, arrayPath: string): string {
-    return `(json_valid(${root}) AND json_type(${root}, ${arrayPath}) != 'array')`;
+    return `(json_valid(${root}) AND json_type(${root}, ${arrayPath}) IS NOT 'array')`;
   }
 
   /**
