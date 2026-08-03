@@ -1,3 +1,16 @@
+# [1.2.0](https://github.com/semics-tech/mongolite/compare/v1.1.0...v1.2.0) (2026-08-03)
+
+
+### Bug Fixes
+
+* $nin/$in/$all missed the missing-field case in SQL find() ([a8f5799](https://github.com/semics-tech/mongolite/commit/a8f579930d787f6ba6c657d3686d8af841f72429))
+* stop one bad row or one scalar field breaking a collection's queries ([2f8861a](https://github.com/semics-tech/mongolite/commit/2f8861a1677b03615aaac93421e02965e8eb0dff))
+
+
+### Features
+
+* shared connections, busy_timeout, and fix the WAL default ([ba8c471](https://github.com/semics-tech/mongolite/commit/ba8c471e324c7127dc7cc4a289862ee4e9490752))
+
 # [1.1.0](https://github.com/semics-tech/mongolite/compare/v1.0.0...v1.1.0) (2026-08-03)
 
 
