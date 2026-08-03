@@ -99,6 +99,28 @@ await users.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
 
+### Native `node:sqlite` (experimental, Node.js 22.5+)
+
+An alternative to the default `better-sqlite3` backend that uses Node.js's
+built-in SQLite module — no native addon, no prebuilt binary, no `node-gyp`.
+It's a separate entry point because `node:sqlite` doesn't exist before
+Node.js 22.5, and importing it eagerly from the main package would break
+everyone on older Node versions.
+
+```typescript
+import { MongoLite, NodeSqliteAdapter } from 'mongolite-ts/node-sqlite';
+
+const client = new MongoLite(new NodeSqliteAdapter('./myapp.sqlite'));
+await client.connect();
+const users = client.collection('users');
+await users.insertOne({ name: 'Alice', age: 30 });
+await client.close();
+```
+
+`node:sqlite` is still marked experimental upstream, so treat this adapter
+as experimental too — the default `better-sqlite3` backend remains the
+recommended choice for production use until `node:sqlite` stabilizes.
+
 ### Browser (via sql.js)
 
 Requires [sql.js](https://www.npmjs.com/package/sql.js) (`npm install sql.js`).

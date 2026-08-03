@@ -13,6 +13,10 @@
     "./cloudflare": {
       "types": "./dist/cloudflare.d.ts",
       "default": "./dist/cloudflare.js"
+    },
+    "./node-sqlite": {
+      "types": "./dist/node-sqlite.d.ts",
+      "default": "./dist/node-sqlite.js"
     }
   },
   "bin": {
