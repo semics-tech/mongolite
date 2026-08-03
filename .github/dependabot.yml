@@ -37,6 +37,11 @@ updates:
           - "*prettier*"
           - "*test*"
           - "*jest*"
+    ignore:
+      # @typescript-eslint (as of 8.65.x) still requires typescript <6.1.0, so a
+      # major bump here breaks `npm ci` via ERESOLVE until that peer dep is relaxed.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # Enable version updates for GitHub Actions
   - package-ecosystem: "github-actions"

@@ -445,7 +445,12 @@ export class FindCursor<T extends DocumentWithId> {
       if (Array.isArray(value) && value.length > 0) {
         const allConditions = value
           .map((item) => {
-            if (typeof item === 'object' && item !== null && !Array.isArray(item) && !(item instanceof Date)) {
+            if (
+              typeof item === 'object' &&
+              item !== null &&
+              !Array.isArray(item) &&
+              !(item instanceof Date)
+            ) {
               // For object elements, we need to check if any array element matches all properties
               const objectConditions: string[] = [];
               for (const [key, val] of Object.entries(item)) {
@@ -586,7 +591,10 @@ export class FindCursor<T extends DocumentWithId> {
           if (
             op === '$in' &&
             Array.isArray(opValue) &&
-            opValue.some((v) => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date))
+            opValue.some(
+              (v) =>
+                typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date)
+            )
           ) {
             return this.buildArraySubquery(field, op, opValue, params);
           }
@@ -685,7 +693,9 @@ export class FindCursor<T extends DocumentWithId> {
             const hasOperators = Object.keys(value).some((k) => k.startsWith('$'));
 
             if (hasOperators) {
-              conditions.push(`(${this.buildFieldOperatorConditions(key, value as Record<string, unknown>, params)})`);
+              conditions.push(
+                `(${this.buildFieldOperatorConditions(key, value as Record<string, unknown>, params)})`
+              );
             } else {
               // This is an object equality check (exact match)
               const jsonPath = this.parseJsonPath(key);

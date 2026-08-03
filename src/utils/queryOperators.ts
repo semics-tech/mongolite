@@ -33,7 +33,12 @@ function matchesBsonType(value: unknown, bsonType: string | number): boolean {
       return typeof value === 'string';
     case 3:
     case 'object':
-      return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
+      return (
+        typeof value === 'object' &&
+        value !== null &&
+        !Array.isArray(value) &&
+        !(value instanceof Date)
+      );
     case 4:
     case 'array':
       return Array.isArray(value);
@@ -91,12 +96,16 @@ export function evaluateOperator(
     case '$nin':
       if (!Array.isArray(opValue)) return false;
       if (Array.isArray(docValue)) {
-        return !docValue.some((el) => opValue.some((v) => JSON.stringify(el) === JSON.stringify(v)));
+        return !docValue.some((el) =>
+          opValue.some((v) => JSON.stringify(el) === JSON.stringify(v))
+        );
       }
       return !opValue.some((v) => JSON.stringify(v) === JSON.stringify(docValue));
     case '$all':
       if (!Array.isArray(opValue) || !Array.isArray(docValue)) return false;
-      return opValue.every((item) => docValue.some((el) => JSON.stringify(el) === JSON.stringify(item)));
+      return opValue.every((item) =>
+        docValue.some((el) => JSON.stringify(el) === JSON.stringify(item))
+      );
     case '$exists':
       return opValue ? docValue !== undefined : docValue === undefined;
     case '$not':
@@ -105,7 +114,10 @@ export function evaluateOperator(
       const pattern =
         opValue instanceof RegExp
           ? opValue
-          : new RegExp(opValue as string, typeof regexOptions === 'string' ? regexOptions : undefined);
+          : new RegExp(
+              opValue as string,
+              typeof regexOptions === 'string' ? regexOptions : undefined
+            );
       return pattern.test(String(docValue));
     }
     case '$size':
@@ -115,7 +127,8 @@ export function evaluateOperator(
       return types.some((t) => matchesBsonType(docValue, t as string | number));
     }
     case '$mod': {
-      if (!Array.isArray(opValue) || opValue.length !== 2 || typeof docValue !== 'number') return false;
+      if (!Array.isArray(opValue) || opValue.length !== 2 || typeof docValue !== 'number')
+        return false;
       const [divisor, remainder] = opValue as [number, number];
       return Math.trunc(docValue) % divisor === remainder;
     }
