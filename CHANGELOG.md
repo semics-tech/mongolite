@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/semics-tech/mongolite/compare/v1.0.0...v1.1.0) (2026-08-03)
+
+
+### Features
+
+* add CommonJS build alongside ESM; repo completeness fixes ([8499168](https://github.com/semics-tech/mongolite/commit/849916811439218373e253268ec1c4e899726649))
+
 # [1.0.0](https://github.com/semics-tech/mongolite/compare/v0.8.5...v1.0.0) (2026-08-03)
 
 
