@@ -1,9 +1,9 @@
 /**
  * `better-sqlite3`-backed entry point for MongoLite.
  *
- * The main `mongolite-ts` entry point defaults to `NodeSqliteAdapter`, backed by
+ * The main `@semics-tech/mongolite` entry point defaults to `NodeSqliteAdapter`, backed by
  * Node.js's built-in `node:sqlite` module, which requires Node.js 22.5.0+. Import
- * from `mongolite-ts/better-sqlite3` instead if you need to run on an older
+ * from `@semics-tech/mongolite/better-sqlite3` instead if you need to run on an older
  * Node.js runtime, or you simply prefer the more battle-tested `better-sqlite3`
  * native addon.
  *
@@ -17,7 +17,7 @@
  * ## Usage
  *
  * ```ts
- * import { MongoLite } from 'mongolite-ts/better-sqlite3';
+ * import { MongoLite } from '@semics-tech/mongolite/better-sqlite3';
  *
  * const client = new MongoLite('./myapp.sqlite');
  * await client.connect();

@@ -31,7 +31,7 @@ export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
  * You can construct it with:
  * - A file path string — uses the built-in `node:sqlite` adapter (`NodeSqliteAdapter`).
  *   Requires Node.js 22.5.0+; for older runtimes, import `MongoLite` from
- *   `mongolite-ts/better-sqlite3` instead.
+ *   `@semics-tech/mongolite/better-sqlite3` instead.
  * - A `MongoLiteClientOptions` object — uses the built-in adapter with options.
  * - An `IDatabaseAdapter` instance — use a custom adapter such as
  *   `CloudflareDurableObjectAdapter` for Cloudflare Durable Objects.

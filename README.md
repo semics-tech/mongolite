@@ -37,6 +37,8 @@ Node's built-in `node:sqlite` module, so there's no native addon to install or
 build. On an older Node.js runtime, use the `better-sqlite3`-backed adapter
 instead; see [Native `node:sqlite` vs. `better-sqlite3`](#native-nodesqlite-vs-better-sqlite3) below.
 
+Ships both ESM (`import`) and CommonJS (`require`) builds — use whichever your project already uses.
+
 ## Quick Start
 
 ```typescript
@@ -122,7 +124,7 @@ await client.close();
 The default backend above uses Node's built-in `node:sqlite` module, which
 requires Node.js 22.5.0+. If you're on an older Node.js runtime, or you
 simply prefer the more battle-tested native addon, import from the
-`mongolite-ts/better-sqlite3` entry point instead. `better-sqlite3` is an
+`@semics-tech/mongolite/better-sqlite3` entry point instead. `better-sqlite3` is an
 **optional dependency** — install it yourself if it wasn't already pulled in:
 
 ```bash
@@ -130,7 +132,7 @@ npm install better-sqlite3
 ```
 
 ```typescript
-import { MongoLite } from 'mongolite-ts/better-sqlite3';
+import { MongoLite } from '@semics-tech/mongolite/better-sqlite3';
 
 const client = new MongoLite('./myapp.sqlite');
 await client.connect();

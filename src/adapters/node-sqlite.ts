@@ -12,7 +12,7 @@ type SqlBindValue = string | number | bigint | null | NodeJS.ArrayBufferView;
  * ## Usage
  *
  * ```ts
- * import { MongoLite, NodeSqliteAdapter } from 'mongolite-ts';
+ * import { MongoLite, NodeSqliteAdapter } from '@semics-tech/mongolite';
  *
  * const client = new MongoLite(new NodeSqliteAdapter('./data.db'));
  * await client.connect();

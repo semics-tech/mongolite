@@ -2,28 +2,32 @@
   "name": "@semics-tech/mongolite",
   "version": "1.0.0",
   "description": "A MongoDB-like client using SQLite as a persistent store, written in TypeScript.",
-  "main": "dist/index.js",
+  "main": "dist/cjs/index.js",
   "type": "module",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
     },
     "./cloudflare": {
       "types": "./dist/cloudflare.d.ts",
-      "default": "./dist/cloudflare.js"
+      "import": "./dist/cloudflare.js",
+      "require": "./dist/cjs/cloudflare.js"
     },
     "./better-sqlite3": {
       "types": "./dist/better-sqlite3.d.ts",
-      "default": "./dist/better-sqlite3.js"
+      "import": "./dist/better-sqlite3.js",
+      "require": "./dist/cjs/better-sqlite3.js"
     }
   },
   "bin": {
     "mongolite-debug": "dist/bin/mongolite-debug.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.cjs.json && cp src/cjs-package-stub.json dist/cjs/package.json",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:parity": "node --import tsx --test tests/parity/*.parity.test.ts",
     "test:coverage": "c8 --reporter=lcov --reporter=text node --import tsx --test tests/*.test.ts",
