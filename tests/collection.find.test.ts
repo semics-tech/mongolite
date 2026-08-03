@@ -507,9 +507,14 @@ describe('MongoLiteCollection - Find Operations', () => {
     });
 
     it('should find documents using $nin operator for top-level field', async () => {
-      const docs = await collection.find({ value: { $nin: [10, 30, 50] } }).toArray(); // Should only leave value: 20
-      assert.strictEqual(docs.length, 2);
-      assert.ok(docs.every((d) => d.value === 20));
+      const docs = await collection.find({ value: { $nin: [10, 30, 50] } }).toArray();
+      // MongoDB semantics: $nin matches documents whose value is not in the list,
+      // *including* those where the field is null or absent — the same treatment
+      // the $ne test above documents. emptyDoc (value: null) therefore matches
+      // alongside the two value: 20 documents.
+      assert.strictEqual(docs.length, 3);
+      assert.ok(docs.every((d) => d.value === 20 || d.value === null));
+      assert.ok(docs.some((d) => d.value === null));
     });
 
     it('should find documents using $in operator for array field (element match)', async () => {
@@ -1260,10 +1265,7 @@ describe('MongoLiteCollection - Find Operations', () => {
       it('should handle $and with $in operator', async () => {
         const docs = await collection
           .find({
-            $and: [
-              { 'something.a': { $in: [1, 2] } },
-              { 'something.b': { $in: [2, 3] } },
-            ],
+            $and: [{ 'something.a': { $in: [1, 2] } }, { 'something.b': { $in: [2, 3] } }],
           })
           .toArray();
 

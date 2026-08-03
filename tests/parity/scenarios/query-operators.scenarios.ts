@@ -24,6 +24,13 @@ export const queryOperatorScenarios: ParityScenario<OpDoc>[] = [
   { description: '$lte matches lesser-or-equal values', seedDocs, operation: { kind: 'find', filter: { n: { $lte: 10 } } } },
   { description: '$in matches any listed value', seedDocs, operation: { kind: 'find', filter: { n: { $in: [10, 15] } } } },
   { description: '$nin excludes listed values', seedDocs, operation: { kind: 'find', filter: { n: { $nin: [10, 15] } } } },
+  // Scalar *string* fields specifically: the numeric cases above pass even with a
+  // broken is-array check, because a bare number is still valid JSON where a bare
+  // string is not. That asymmetry is why $in/$nin on string fields went unnoticed.
+  { description: '$in matches a scalar string field', seedDocs, operation: { kind: 'find', filter: { s: { $in: ['hello', 'world'] } } } },
+  { description: '$nin excludes values of a scalar string field', seedDocs, operation: { kind: 'find', filter: { s: { $nin: ['hello'] } } } },
+  { description: '$nin also matches documents missing the field', seedDocs, operation: { kind: 'find', filter: { opt: { $nin: ['present'] } } } },
+  { description: '$in matches an array field alongside scalars', seedDocs, operation: { kind: 'find', filter: { tags: { $in: ['b'] } } } },
   { description: '$all requires every listed array element present', seedDocs, operation: { kind: 'find', filter: { tags: { $all: ['a', 'b'] } } } },
   { description: '$exists: true matches documents with the field present', seedDocs, operation: { kind: 'find', filter: { opt: { $exists: true } } } },
   { description: '$exists: false matches documents missing the field', seedDocs, operation: { kind: 'find', filter: { opt: { $exists: false } } } },
