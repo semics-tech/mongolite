@@ -18,12 +18,13 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 - **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate`, and more
 - **SQLite persistence** — single file, zero configuration, works offline
 - **Automatic `_id` generation** — UUID assigned on insert if not provided
-- **WAL mode** — Write-Ahead Logging for better concurrent read access
+- **WAL mode** — Write-Ahead Logging for better concurrent read access, on by default
+- **Shared connections** — opt into one pooled connection per file per process
 - **Rich query operators** — `$eq`, `$gt`, `$in`, `$and`, `$or`, `$elemMatch`, `$regex`, and more
 - **Update operators** — `$set`, `$inc`, `$push`, `$pull`, `$addToSet`, `$mul`, and more
 - **Indexing** — create, list, and drop indexes including unique and compound indexes
 - **Change streams** — real-time change tracking via `collection.watch()`
-- **JSON safety** — validates documents before insert and recovers from corrupted data
+- **JSON safety** — validates documents before insert, and a corrupted row can't break queries for the rest of the collection
 - **TypeScript** — fully typed with strict mode
 
 ## Installation
@@ -105,6 +106,43 @@ const users = client.collection('users');
 await users.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
+
+### Connection options
+
+```typescript
+const client = new MongoLite({
+  filePath: './myapp.sqlite',
+  WAL: true,          // Write-Ahead Logging. Default: true
+  busyTimeout: 5000,  // ms to wait for a lock before SQLITE_BUSY. Default: 5000
+  shared: true,       // reuse one connection per file in this process. Default: false
+  readOnly: false,
+  verbose: false,
+});
+```
+
+#### Sharing one connection across a process
+
+Applications often end up with several clients pointing at the same database file
+— a module-level client, a background job, a request handler — each opening its
+own connection, and each then hand-rolling an instance cache to avoid the
+resulting lock contention. `shared: true` moves that into the library:
+
+```typescript
+// Both resolve to the same file, so they share a single SQLite connection.
+const a = new MongoLite({ filePath: './app.sqlite', shared: true });
+const b = new MongoLite({ filePath: './app.sqlite', shared: true });
+
+await a.close(); // b keeps working — the handle is reference counted
+await b.close(); // last holder out actually closes it
+```
+
+Connections are only shared when the resolved path *and* every setting that
+changes the handle's behaviour match. `:memory:` databases are never shared,
+since two `:memory:` opens are two unrelated databases.
+
+This dedupes connections **within a process only**. Separate processes each get
+their own, so cross-process contention is handled by WAL mode and `busyTimeout`
+instead.
 
 ### In-memory (tests / ephemeral)
 

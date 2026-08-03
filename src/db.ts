@@ -1,5 +1,22 @@
 import Database from 'better-sqlite3';
 import type { Statement } from 'better-sqlite3';
+import path from 'node:path';
+import {
+  ConnectionRegistry,
+  DEFAULT_BUSY_TIMEOUT_MS,
+  buildConnectionKey,
+  isShareablePath,
+} from './utils/connection-registry.js';
+
+export { DEFAULT_BUSY_TIMEOUT_MS };
+
+/** Shared `better-sqlite3` handles for this process, keyed by connection identity. */
+const sharedConnections = new ConnectionRegistry<Database.Database>();
+
+/** Exposed for tests and diagnostics. */
+export function sharedConnectionCount(): number {
+  return sharedConnections.size;
+}
 
 /**
  * Common interface for database adapters.
@@ -18,7 +35,24 @@ export interface MongoLiteOptions {
   filePath: string;
   verbose?: boolean;
   readOnly?: boolean;
-  WAL?: boolean; // Add Write-Ahead Logging option
+  /** Write-Ahead Logging. Defaults to `true`. */
+  WAL?: boolean;
+  /**
+   * How long (ms) SQLite waits for a lock held by another connection before
+   * throwing `SQLITE_BUSY`. Defaults to {@link DEFAULT_BUSY_TIMEOUT_MS}; set to
+   * `0` to fail immediately.
+   */
+  busyTimeout?: number;
+  /**
+   * Reuse a single underlying SQLite connection across every instance in this
+   * process that resolves to the same database file and settings, instead of
+   * opening one connection per instance. Reference counted — `close()` only
+   * closes the real handle once the last holder releases it.
+   *
+   * Ignored for `:memory:` databases, which are private to their connection.
+   * Defaults to `false`.
+   */
+  shared?: boolean;
 }
 
 /**
@@ -31,6 +65,8 @@ export class SQLiteDB implements IDatabaseAdapter {
   private readonly verbose: boolean;
   private readonly readOnly: boolean;
   private readonly WAL: boolean;
+  private readonly busyTimeout: number;
+  private readonly shareKey: string | null;
   private openPromise: Promise<void> | null = null;
 
   /**
@@ -39,17 +75,35 @@ export class SQLiteDB implements IDatabaseAdapter {
    * Use ':memory:' for an in-memory database.
    */
   constructor(dbPathOrOptions: string | MongoLiteOptions) {
+    let shared: boolean;
+
     if (typeof dbPathOrOptions === 'string') {
       this.filePath = dbPathOrOptions;
       this.verbose = false;
       this.readOnly = false;
-      this.WAL = false;
+      this.WAL = true;
+      this.busyTimeout = DEFAULT_BUSY_TIMEOUT_MS;
+      shared = false;
     } else {
       this.filePath = dbPathOrOptions.filePath;
       this.verbose = dbPathOrOptions.verbose || false;
       this.readOnly = dbPathOrOptions.readOnly || false;
-      this.WAL = dbPathOrOptions.WAL || true;
+      this.WAL = dbPathOrOptions.WAL ?? true;
+      this.busyTimeout = dbPathOrOptions.busyTimeout ?? DEFAULT_BUSY_TIMEOUT_MS;
+      shared = dbPathOrOptions.shared ?? false;
     }
+
+    this.shareKey =
+      shared && isShareablePath(this.filePath)
+        ? buildConnectionKey({
+            backend: 'better-sqlite3',
+            filePath: path.resolve(this.filePath),
+            readOnly: this.readOnly,
+            WAL: this.WAL,
+            busyTimeout: this.busyTimeout,
+            verbose: this.verbose,
+          })
+        : null;
   }
 
   /**
@@ -67,53 +121,69 @@ export class SQLiteDB implements IDatabaseAdapter {
 
     this.openPromise = new Promise((resolve, reject) => {
       try {
-        const options: Database.Options = {
-          readonly: this.readOnly,
-          verbose: this.verbose ? console.log : undefined,
+        // Only runs on a genuinely new connection — when sharing, an existing
+        // handle already has its pragmas and UDFs applied.
+        const openConnection = (): Database.Database => {
+          const options: Database.Options = {
+            readonly: this.readOnly,
+            verbose: this.verbose ? console.log : undefined,
+          };
+
+          const db = new Database(this.filePath, options);
+
+          // Enable Write-Ahead Logging if requested
+          if (this.WAL && !this.readOnly) {
+            db.pragma('journal_mode = WAL');
+          }
+
+          // Wait rather than immediately throwing SQLITE_BUSY when another
+          // connection (often another process) holds a lock.
+          if (this.busyTimeout > 0) {
+            db.pragma(`busy_timeout = ${this.busyTimeout}`);
+          }
+
+          // Register regexp UDF for $regex operator support.
+          // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
+          // not validated for catastrophic backtracking (ReDoS) could block the event loop.
+          // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
+          db.function(
+            'regexp',
+            { deterministic: true },
+            (pattern: unknown, value: unknown): number => {
+              if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
+              try {
+                return new RegExp(pattern).test(String(value)) ? 1 : 0;
+              } catch {
+                return 0;
+              }
+            }
+          );
+
+          // Register regexp_flags UDF for $regex with $options support
+          db.function(
+            'regexp_flags',
+            { deterministic: true },
+            (pattern: unknown, flags: unknown, value: unknown): number => {
+              if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
+              try {
+                const f = typeof flags === 'string' ? flags : '';
+                return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
+              } catch {
+                return 0;
+              }
+            }
+          );
+
+          if (this.verbose) {
+            console.log(`SQLite database opened: ${this.filePath}`);
+          }
+
+          return db;
         };
 
-        this.db = new Database(this.filePath, options);
-
-        // Enable Write-Ahead Logging if requested
-        if (this.WAL && !this.readOnly) {
-          this.db.pragma('journal_mode = WAL');
-        }
-
-        // Register regexp UDF for $regex operator support.
-        // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
-        // not validated for catastrophic backtracking (ReDoS) could block the event loop.
-        // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
-        this.db.function(
-          'regexp',
-          { deterministic: true },
-          (pattern: unknown, value: unknown): number => {
-            if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
-            try {
-              return new RegExp(pattern).test(String(value)) ? 1 : 0;
-            } catch {
-              return 0;
-            }
-          }
-        );
-
-        // Register regexp_flags UDF for $regex with $options support
-        this.db.function(
-          'regexp_flags',
-          { deterministic: true },
-          (pattern: unknown, flags: unknown, value: unknown): number => {
-            if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
-            try {
-              const f = typeof flags === 'string' ? flags : '';
-              return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
-            } catch {
-              return 0;
-            }
-          }
-        );
-
-        if (this.verbose) {
-          console.log(`SQLite database opened: ${this.filePath}`);
-        }
+        this.db = this.shareKey
+          ? sharedConnections.acquire(this.shareKey, openConnection)
+          : openConnection();
 
         resolve();
       } catch (err) {
@@ -228,9 +298,21 @@ export class SQLiteDB implements IDatabaseAdapter {
     }
     if (this.db) {
       try {
-        this.db.close();
+        // When shared, only the last holder actually closes the handle.
+        const isLastHolder = this.shareKey
+          ? sharedConnections.release(this.shareKey, this.db)
+          : true;
+
+        if (isLastHolder) {
+          this.db.close();
+        }
+
         if (this.verbose) {
-          console.log(`SQLite database closed: ${this.filePath}`);
+          console.log(
+            isLastHolder
+              ? `SQLite database closed: ${this.filePath}`
+              : `SQLite database released (still in use): ${this.filePath}`
+          );
         }
       } catch (err) {
         console.error(`Error closing database ${this.filePath}:`, (err as Error).message);

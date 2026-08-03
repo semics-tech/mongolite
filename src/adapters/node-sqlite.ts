@@ -1,5 +1,20 @@
 import { DatabaseSync } from 'node:sqlite';
+import path from 'node:path';
 import type { IDatabaseAdapter, MongoLiteOptions } from '../db.js';
+import {
+  ConnectionRegistry,
+  DEFAULT_BUSY_TIMEOUT_MS,
+  buildConnectionKey,
+  isShareablePath,
+} from '../utils/connection-registry.js';
+
+/** Shared `node:sqlite` handles for this process, keyed by connection identity. */
+const sharedConnections = new ConnectionRegistry<DatabaseSync>();
+
+/** Exposed for tests and diagnostics. */
+export function sharedConnectionCount(): number {
+  return sharedConnections.size;
+}
 
 /** Scalar values `node:sqlite` accepts as bound statement parameters. */
 type SqlBindValue = string | number | bigint | null | NodeJS.ArrayBufferView;
@@ -37,6 +52,8 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
   private readonly verbose: boolean;
   private readonly readOnly: boolean;
   private readonly WAL: boolean;
+  private readonly busyTimeout: number;
+  private readonly shareKey: string | null;
   private openPromise: Promise<void> | null = null;
 
   /**
@@ -45,17 +62,35 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
    * `better-sqlite3` adapter's `MongoLiteOptions`.
    */
   constructor(dbPathOrOptions: string | MongoLiteOptions) {
+    let shared: boolean;
+
     if (typeof dbPathOrOptions === 'string') {
       this.filePath = dbPathOrOptions;
       this.verbose = false;
       this.readOnly = false;
-      this.WAL = false;
+      this.WAL = true;
+      this.busyTimeout = DEFAULT_BUSY_TIMEOUT_MS;
+      shared = false;
     } else {
       this.filePath = dbPathOrOptions.filePath;
       this.verbose = dbPathOrOptions.verbose || false;
       this.readOnly = dbPathOrOptions.readOnly || false;
-      this.WAL = dbPathOrOptions.WAL || true;
+      this.WAL = dbPathOrOptions.WAL ?? true;
+      this.busyTimeout = dbPathOrOptions.busyTimeout ?? DEFAULT_BUSY_TIMEOUT_MS;
+      shared = dbPathOrOptions.shared ?? false;
     }
+
+    this.shareKey =
+      shared && isShareablePath(this.filePath)
+        ? buildConnectionKey({
+            backend: 'node:sqlite',
+            filePath: path.resolve(this.filePath),
+            readOnly: this.readOnly,
+            WAL: this.WAL,
+            busyTimeout: this.busyTimeout,
+            verbose: this.verbose,
+          })
+        : null;
   }
 
   /**
@@ -71,47 +106,63 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
 
     this.openPromise = new Promise((resolve, reject) => {
       try {
-        this.db = new DatabaseSync(this.filePath, { readOnly: this.readOnly });
+        // Only runs on a genuinely new connection — when sharing, an existing
+        // handle already has its pragmas and UDFs applied.
+        const openConnection = (): DatabaseSync => {
+          const db = new DatabaseSync(this.filePath, { readOnly: this.readOnly });
 
-        if (this.WAL && !this.readOnly) {
-          this.db.exec('PRAGMA journal_mode = WAL');
-        }
-
-        // Register regexp UDF for $regex operator support.
-        // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
-        // not validated for catastrophic backtracking (ReDoS) could block the event loop.
-        // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
-        this.db.function(
-          'regexp',
-          { deterministic: true },
-          (pattern: unknown, value: unknown): number => {
-            if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
-            try {
-              return new RegExp(pattern).test(String(value)) ? 1 : 0;
-            } catch {
-              return 0;
-            }
+          if (this.WAL && !this.readOnly) {
+            db.exec('PRAGMA journal_mode = WAL');
           }
-        );
 
-        // Register regexp_flags UDF for $regex with $options support
-        this.db.function(
-          'regexp_flags',
-          { deterministic: true },
-          (pattern: unknown, flags: unknown, value: unknown): number => {
-            if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
-            try {
-              const f = typeof flags === 'string' ? flags : '';
-              return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
-            } catch {
-              return 0;
-            }
+          // Wait rather than immediately throwing SQLITE_BUSY when another
+          // connection (often another process) holds a lock.
+          if (this.busyTimeout > 0) {
+            db.exec(`PRAGMA busy_timeout = ${this.busyTimeout}`);
           }
-        );
 
-        if (this.verbose) {
-          console.log(`SQLite database opened (node:sqlite): ${this.filePath}`);
-        }
+          // Register regexp UDF for $regex operator support.
+          // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
+          // not validated for catastrophic backtracking (ReDoS) could block the event loop.
+          // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
+          db.function(
+            'regexp',
+            { deterministic: true },
+            (pattern: unknown, value: unknown): number => {
+              if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
+              try {
+                return new RegExp(pattern).test(String(value)) ? 1 : 0;
+              } catch {
+                return 0;
+              }
+            }
+          );
+
+          // Register regexp_flags UDF for $regex with $options support
+          db.function(
+            'regexp_flags',
+            { deterministic: true },
+            (pattern: unknown, flags: unknown, value: unknown): number => {
+              if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
+              try {
+                const f = typeof flags === 'string' ? flags : '';
+                return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
+              } catch {
+                return 0;
+              }
+            }
+          );
+
+          if (this.verbose) {
+            console.log(`SQLite database opened (node:sqlite): ${this.filePath}`);
+          }
+
+          return db;
+        };
+
+        this.db = this.shareKey
+          ? sharedConnections.acquire(this.shareKey, openConnection)
+          : openConnection();
 
         resolve();
       } catch (err) {
@@ -191,9 +242,21 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
     }
     if (this.db) {
       try {
-        this.db.close();
+        // When shared, only the last holder actually closes the handle.
+        const isLastHolder = this.shareKey
+          ? sharedConnections.release(this.shareKey, this.db)
+          : true;
+
+        if (isLastHolder) {
+          this.db.close();
+        }
+
         if (this.verbose) {
-          console.log(`SQLite database closed (node:sqlite): ${this.filePath}`);
+          console.log(
+            isLastHolder
+              ? `SQLite database closed (node:sqlite): ${this.filePath}`
+              : `SQLite database released (still in use): ${this.filePath}`
+          );
         }
       } catch (err) {
         console.error(`Error closing database ${this.filePath}:`, (err as Error).message);
