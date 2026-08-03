@@ -1,3 +1,23 @@
+# [1.0.0](https://github.com/semics-tech/mongolite/compare/v0.8.5...v1.0.0) (2026-08-03)
+
+
+* feat!: publish as scoped package @semics-tech/mongolite ([b8be206](https://github.com/semics-tech/mongolite/commit/b8be2069ffe3d60648d6b1acf99b95c414dc1260))
+
+
+### BREAKING CHANGES
+
+* the package published to npm moves from `mongolite-ts` to
+the scoped name `@semics-tech/mongolite`, matching the GitHub org/repo name
+and dropping the "-ts" suffix mismatch. `mongolite-ts` will no longer
+receive updates; update your dependency and imports to `@semics-tech/mongolite`
+(and `@semics-tech/mongolite/cloudflare` for the Cloudflare entry point).
+
+Also fixes a broken CONTRIBUTING.md issue-tracker link (leftover
+YOUR_USERNAME placeholder), and moves the README's comparison table below
+the Quick Start section so setup comes first.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
 ## [0.8.5](https://github.com/semics-tech/mongolite/compare/v0.8.4...v0.8.5) (2026-08-03)
 
 
