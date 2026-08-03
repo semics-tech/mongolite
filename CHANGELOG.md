@@ -1,3 +1,10 @@
+## [0.8.5](https://github.com/semics-tech/mongolite/compare/v0.8.4...v0.8.5) (2026-08-03)
+
+
+### Bug Fixes
+
+* resolve prettier lint failures breaking CI, ignore incompatible typescript major bump ([10704c4](https://github.com/semics-tech/mongolite/commit/10704c404bda9fb6f89f82eddbfac58600114270))
+
 ## [0.8.4](https://github.com/semics-tech/mongolite/compare/v0.8.3...v0.8.4) (2026-07-15)
 
 ## [0.8.3](https://github.com/semics-tech/mongolite/compare/v0.8.2...v0.8.3) (2026-07-15)
