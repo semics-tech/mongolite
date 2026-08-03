@@ -28,7 +28,7 @@ try {
     "type": "module",
     "private": true,
     "dependencies": {
-      "mongolite-ts": "file:" + rootDir
+      "@semics-tech/mongolite": "file:" + rootDir
     }
   };
   
@@ -36,7 +36,7 @@ try {
   
   // Create a test script that imports and uses the package
   const testScript = `
-import { MongoLite } from 'mongolite-ts';
+import { MongoLite } from '@semics-tech/mongolite';
 
 async function testMongoLite() {
   console.log('🔍 Testing MongoLite import in a third-party project...');

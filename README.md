@@ -1,7 +1,7 @@
 # MongoLite
 
 [![CI](https://github.com/semics-tech/mongolite/actions/workflows/ci.yml/badge.svg)](https://github.com/semics-tech/mongolite/actions/workflows/ci.yml)
-[![NPM version](https://img.shields.io/npm/v/mongolite-ts.svg)](https://www.npmjs.com/package/mongolite-ts)
+[![NPM version](https://img.shields.io/npm/v/@semics-tech/mongolite.svg)](https://www.npmjs.com/package/@semics-tech/mongolite)
 [![Codecov](https://codecov.io/gh/semics-tech/mongolite/branch/master/graph/badge.svg)](https://codecov.io/gh/semics-tech/mongolite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -12,19 +12,6 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 - You want a MongoDB-style API without running a MongoDB server
 - You need a lightweight, embedded database for local apps, CLIs, or testing
 - You want simple file-based persistence with zero infrastructure overhead
-
-## How does it compare?
-
-| | MongoLite | lowdb | better-sqlite3 (raw) | NeDB | PouchDB | MongoDB |
-|---|---|---|---|---|---|---|
-| MongoDB query API (`$set`, `$elemMatch`, aggregation...) | ✅ | ❌ (plain object access) | ❌ (raw SQL) | ✅ | ❌ (Mango/CouchDB-style) | ✅ |
-| Runs in the browser | ✅ (sql.js) | ✅ | ❌ (native binding) | ✅ | ✅ (IndexedDB) | ❌ |
-| Runs on the edge (Cloudflare Durable Objects) | ✅ | ❌ | ❌ (native binding) | ❌ | ❌ | ❌ |
-| Zero infrastructure (no server process) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| TypeScript, strict mode | ✅ | ✅ | ✅ | ⚠️ (community types) | ⚠️ (community types) | ✅ |
-| Actively maintained | ✅ | ✅ | ✅ | ❌ (unmaintained) | ⚠️ (slow-moving) | ✅ |
-
-MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
 
 ## Features
 
@@ -42,13 +29,13 @@ MongoLite's niche: the MongoDB query API you already know, running anywhere SQLi
 ## Installation
 
 ```bash
-npm install mongolite-ts
+npm install @semics-tech/mongolite
 ```
 
 ## Quick Start
 
 ```typescript
-import { MongoLite } from 'mongolite-ts';
+import { MongoLite } from '@semics-tech/mongolite';
 
 async function main() {
   const client = new MongoLite('./myapp.sqlite');
@@ -74,6 +61,19 @@ async function main() {
 main();
 ```
 
+## How does it compare?
+
+| | MongoLite | lowdb | better-sqlite3 (raw) | NeDB | PouchDB | MongoDB |
+|---|---|---|---|---|---|---|
+| MongoDB query API (`$set`, `$elemMatch`, aggregation...) | ✅ | ❌ (plain object access) | ❌ (raw SQL) | ✅ | ❌ (Mango/CouchDB-style) | ✅ |
+| Runs in the browser | ✅ (sql.js) | ✅ | ❌ (native binding) | ✅ | ✅ (IndexedDB) | ❌ |
+| Runs on the edge (Cloudflare Durable Objects) | ✅ | ❌ | ❌ (native binding) | ❌ | ❌ | ❌ |
+| Zero infrastructure (no server process) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| TypeScript, strict mode | ✅ | ✅ | ✅ | ⚠️ (community types) | ⚠️ (community types) | ✅ |
+| Actively maintained | ✅ | ✅ | ✅ | ❌ (unmaintained) | ⚠️ (slow-moving) | ✅ |
+
+MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
+
 ## Documentation
 
 | Topic | Description |
@@ -90,7 +90,7 @@ main();
 ### SQLite file (Node.js / Bun)
 
 ```typescript
-import { MongoLite } from 'mongolite-ts';
+import { MongoLite } from '@semics-tech/mongolite';
 
 const client = new MongoLite('./myapp.sqlite');
 await client.connect();
@@ -102,7 +102,7 @@ await client.close();
 ### In-memory (tests / ephemeral)
 
 ```typescript
-import { MongoLite } from 'mongolite-ts';
+import { MongoLite } from '@semics-tech/mongolite';
 
 const client = new MongoLite(':memory:');
 await client.connect();
@@ -118,7 +118,7 @@ Requires [sql.js](https://www.npmjs.com/package/sql.js) (`npm install sql.js`).
 
 ```typescript
 import initSqlJs from 'sql.js';
-import { MongoLite, BrowserSqliteAdapter } from 'mongolite-ts';
+import { MongoLite, BrowserSqliteAdapter } from '@semics-tech/mongolite';
 
 const SQL = await initSqlJs({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/sql.js/dist/${file}`,
@@ -137,7 +137,7 @@ await client.close();
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
-import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
+import { MongoLite, CloudflareDurableObjectAdapter } from '@semics-tech/mongolite/cloudflare';
 
 export class MyDurableObject extends DurableObject {
   private client: MongoLite;

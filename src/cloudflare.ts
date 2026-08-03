@@ -1,7 +1,7 @@
 /**
  * Cloudflare-safe entry point for MongoLite.
  *
- * Import from `mongolite-ts/cloudflare` inside Cloudflare Workers / Durable Objects.
+ * Import from `@semics-tech/mongolite/cloudflare` inside Cloudflare Workers / Durable Objects.
  * This module does **not** import `better-sqlite3`, so it bundles cleanly with `wrangler`.
  *
  * ## Requirements
@@ -15,7 +15,7 @@
  *
  * ```ts
  * import { DurableObject } from 'cloudflare:workers';
- * import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
+ * import { MongoLite, CloudflareDurableObjectAdapter } from '@semics-tech/mongolite/cloudflare';
  *
  * export class MyDurableObject extends DurableObject {
  *   private client: MongoLite;

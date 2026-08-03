@@ -38,7 +38,7 @@ export interface SqlStorage {
  *
  * ```ts
  * import { DurableObject } from 'cloudflare:workers';
- * import { MongoLite, CloudflareDurableObjectAdapter } from 'mongolite-ts/cloudflare';
+ * import { MongoLite, CloudflareDurableObjectAdapter } from '@semics-tech/mongolite/cloudflare';
  *
  * export class MyDurableObject extends DurableObject {
  *   private client: MongoLite;

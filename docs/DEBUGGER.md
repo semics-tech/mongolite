@@ -8,7 +8,7 @@ An interactive debugging tool for MongoLite queries that helps you:
 
 ## Installation
 
-The debugger is included with the `mongolite-ts` package. You can use it via npx:
+The debugger is included with the `@semics-tech/mongolite` package. You can use it via npx:
 
 ```bash
 npx mongolite-debug

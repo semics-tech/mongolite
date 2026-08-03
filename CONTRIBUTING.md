@@ -29,7 +29,7 @@ shape, sort behavior, an update operator (`$set`, `$push`, ...), or an aggregati
 
 1. Add or update a scenario in `tests/parity/scenarios/*.scenarios.ts` covering the new/changed
    behavior.
-2. Run `npm run test:parity` locally and confirm mongolite-ts and a real MongoDB instance (via
+2. Run `npm run test:parity` locally and confirm @semics-tech/mongolite and a real MongoDB instance (via
    `mongodb-memory-server`) return identical results.
 
 A hand-written unit test only checks that the code does what *you* believe MongoDB does — it
@@ -42,7 +42,7 @@ When you submit code changes, your submissions are understood to be under the sa
 
 ## Report bugs using GitHub's [issue tracker]
 
-We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/YOUR_USERNAME/mongolite-ts/issues/new); it's that easy!
+We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/semics-tech/mongolite/issues/new); it's that easy!
 
 ## Write bug reports with detail, background, and sample code
 

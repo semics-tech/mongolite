@@ -5,7 +5,7 @@ import { MongoLiteCollection, DocumentWithId } from '../src/index';
 import { SUPPORTED_QUERY_OPERATORS } from '../src/utils/queryOperators';
 
 /**
- * Guards against the exact class of bug this suite exists to catch: mongolite-ts evaluates
+ * Guards against the exact class of bug this suite exists to catch: @semics-tech/mongolite evaluates
  * query operators in (at least) three independent places — find()'s SQL builder
  * (buildComparisonCondition), aggregation's first-stage $match (also pushed down to SQL), and
  * aggregation's later-stage $match (in-memory, via evaluateOperator). If one of these silently

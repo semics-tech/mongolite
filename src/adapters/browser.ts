@@ -36,7 +36,7 @@ export interface SqlJsDatabase {
  *
  * ```ts
  * import initSqlJs from 'sql.js';
- * import { MongoLite, BrowserSqliteAdapter } from 'mongolite-ts';
+ * import { MongoLite, BrowserSqliteAdapter } from '@semics-tech/mongolite';
  *
  * const SQL = await initSqlJs({
  *   locateFile: (file) => `https://cdn.jsdelivr.net/npm/sql.js/dist/${file}`,

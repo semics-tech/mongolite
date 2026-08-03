@@ -5,7 +5,7 @@ MongoLite supports real-time change tracking through change streams, similar to 
 ## Basic Usage
 
 ```typescript
-import { MongoLite } from 'mongolite-ts';
+import { MongoLite } from '@semics-tech/mongolite';
 
 const client = new MongoLite('./mydatabase.sqlite');
 const collection = client.collection('users');

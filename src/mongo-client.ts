@@ -5,7 +5,7 @@
  * Cloudflare Workers / Durable Objects. It exports the core `MongoLite` class
  * that accepts any `IDatabaseAdapter` implementation.
  *
- * Node.js consumers should import from the package root (`mongolite-ts`) which
+ * Node.js consumers should import from the package root (`@semics-tech/mongolite`) which
  * provides additional constructor overloads accepting a file path or options object.
  */
 import type { IDatabaseAdapter } from './db.js';

@@ -60,7 +60,7 @@ export function runParitySuite<T extends DocumentWithId>(
           assert.deepStrictEqual(
             normalizedMongolite,
             normalizedMongo,
-            'mongolite-ts result diverged from real MongoDB'
+            '@semics-tech/mongolite result diverged from real MongoDB'
           );
         }
       });

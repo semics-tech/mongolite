@@ -1,6 +1,6 @@
 # Parity tests
 
-These tests run the same operation against **mongolite-ts** and a **real MongoDB instance**
+These tests run the same operation against **@semics-tech/mongolite** and a **real MongoDB instance**
 (via [`mongodb-memory-server`](https://github.com/typegoose/mongodb-memory-server)) and assert
 the two return identical results. Unlike the rest of the test suite, correctness here isn't
 defined by a hand-written expected value — it's defined by what real MongoDB actually does. That
@@ -54,7 +54,7 @@ behavior changes, the scenario fails instead of silently going stale.
 ## How it works
 
 - `harness/backend.ts` defines a small common interface (`seed`, `run`, `dropCollection`,
-  `close`) implemented once for mongolite-ts (`harness/mongoliteBackend.ts`) and once for the
+  `close`) implemented once for @semics-tech/mongolite (`harness/mongoliteBackend.ts`) and once for the
   real driver (`harness/mongoBackend.ts`).
 - `harness/setup.ts` lazily starts a `MongoMemoryServer` the first time any parity test file
   needs it.
