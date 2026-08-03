@@ -32,6 +32,11 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 npm install mongolite-ts
 ```
 
+Requires **Node.js 22.5.0+** by default — the main entry point is backed by
+Node's built-in `node:sqlite` module, so there's no native addon to install or
+build. On an older Node.js runtime, use the `better-sqlite3`-backed adapter
+instead; see [Native `node:sqlite` vs. `better-sqlite3`](#native-nodesqlite-vs-better-sqlite3) below.
+
 ## Quick Start
 
 ```typescript
@@ -99,27 +104,36 @@ await users.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
 
-### Native `node:sqlite` (experimental, Node.js 22.5+)
+### `better-sqlite3` (optional, for Node.js <22.5 or Bun)
 
-An alternative to the default `better-sqlite3` backend that uses Node.js's
-built-in SQLite module — no native addon, no prebuilt binary, no `node-gyp`.
-It's a separate entry point because `node:sqlite` doesn't exist before
-Node.js 22.5, and importing it eagerly from the main package would break
-everyone on older Node versions.
+The default backend above uses Node's built-in `node:sqlite` module, which
+requires Node.js 22.5.0+. If you're on an older Node.js runtime, or you
+simply prefer the more battle-tested native addon, import from the
+`mongolite-ts/better-sqlite3` entry point instead. `better-sqlite3` is an
+**optional dependency** — install it yourself if it wasn't already pulled in:
+
+```bash
+npm install better-sqlite3
+```
 
 ```typescript
-import { MongoLite, NodeSqliteAdapter } from 'mongolite-ts/node-sqlite';
+import { MongoLite } from 'mongolite-ts/better-sqlite3';
 
-const client = new MongoLite(new NodeSqliteAdapter('./myapp.sqlite'));
+const client = new MongoLite('./myapp.sqlite');
 await client.connect();
 const users = client.collection('users');
 await users.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
 
-`node:sqlite` is still marked experimental upstream, so treat this adapter
-as experimental too — the default `better-sqlite3` backend remains the
-recommended choice for production use until `node:sqlite` stabilizes.
+<a id="native-nodesqlite-vs-better-sqlite3"></a>
+> **Which one should I use?** `node:sqlite` (the default) is still marked
+> experimental upstream but requires no native build step, which is why it's
+> the default here. `better-sqlite3` is the older, more battle-tested native
+> addon — reach for it if you're stuck on Node.js <22.5, targeting Bun without
+> a `node:sqlite` polyfill, or want to avoid depending on an experimental
+> Node.js API in production. Both implement the same `IDatabaseAdapter`
+> interface, so switching between them is a one-line import change.
 
 ### Browser (via sql.js)
 

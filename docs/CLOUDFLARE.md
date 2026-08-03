@@ -132,9 +132,10 @@ All core MongoLite CRUD operations are supported:
 
 ### `$regex` queries are not supported
 
-The default `SQLiteDB` adapter registers a custom `regexp()` SQL function to support
-`$regex` query operators.  Cloudflare Durable Objects do not allow registering custom
-SQL functions, so any query that uses `$regex` will throw a SQL error at runtime.
+The default `NodeSqliteAdapter` (and the optional `SQLiteDB`/`better-sqlite3` adapter)
+register a custom `regexp()` SQL function to support `$regex` query operators.
+Cloudflare Durable Objects do not allow registering custom SQL functions, so any
+query that uses `$regex` will throw a SQL error at runtime.
 
 Use JavaScript-side filtering as a workaround:
 
@@ -178,8 +179,8 @@ Durable Object context (`ctx.storage.sql`).
 ### `IDatabaseAdapter`
 
 `CloudflareDurableObjectAdapter` implements the `IDatabaseAdapter` interface that is also
-implemented by the built-in `SQLiteDB` class.  You can use this interface to write code
-that works with both backends:
+implemented by the built-in `NodeSqliteAdapter` and `SQLiteDB` classes.  You can use this
+interface to write code that works with any of these backends:
 
 ```typescript
 import { IDatabaseAdapter, MongoLite } from 'mongolite-ts/cloudflare';

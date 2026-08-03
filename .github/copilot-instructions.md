@@ -17,7 +17,7 @@ MongoLite is a MongoDB-like client that uses SQLite as its underlying persistent
 **Technology Stack:**
 - **Language:** TypeScript 5.8+
 - **Node:** 18.0.0 or higher
-- **Database:** SQLite (better-sqlite3)
+- **Database:** SQLite (`node:sqlite` by default; `better-sqlite3` available as an optional adapter for Node.js <22.5)
 - **Testing:** Node.js native test runner with c8 coverage
 - **Code Style:** ESLint + Prettier (2-space indentation)
 

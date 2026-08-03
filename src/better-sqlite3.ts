@@ -1,4 +1,33 @@
-import { NodeSqliteAdapter } from './adapters/node-sqlite.js';
+/**
+ * `better-sqlite3`-backed entry point for MongoLite.
+ *
+ * The main `mongolite-ts` entry point defaults to `NodeSqliteAdapter`, backed by
+ * Node.js's built-in `node:sqlite` module, which requires Node.js 22.5.0+. Import
+ * from `mongolite-ts/better-sqlite3` instead if you need to run on an older
+ * Node.js runtime, or you simply prefer the more battle-tested `better-sqlite3`
+ * native addon.
+ *
+ * `better-sqlite3` is an **optional dependency** of this package — install it
+ * yourself if it wasn't already pulled in:
+ *
+ * ```bash
+ * npm install better-sqlite3
+ * ```
+ *
+ * ## Usage
+ *
+ * ```ts
+ * import { MongoLite } from 'mongolite-ts/better-sqlite3';
+ *
+ * const client = new MongoLite('./myapp.sqlite');
+ * await client.connect();
+ * const users = client.collection('users');
+ * await users.insertOne({ name: 'Alice', age: 30 });
+ * await client.close();
+ * ```
+ */
+
+import { SQLiteDB } from './db.js';
 import type { IDatabaseAdapter, MongoLiteOptions as DBMongoLiteOptions } from './db.js';
 import { MongoLite as MongoLiteBase, MongoLiteBaseOptions } from './mongo-client.js';
 
@@ -11,37 +40,19 @@ export type {
   ChangeOperationType,
 } from './changeStream.js';
 export type { IDatabaseAdapter } from './db.js';
-export {
-  CloudflareDurableObjectAdapter,
-} from './adapters/cloudflare.js';
-export type {
-  SqlStorage,
-  SqlStorageCursor,
-  SqlStorageValue,
-} from './adapters/cloudflare.js';
-export { BrowserSqliteAdapter } from './adapters/browser.js';
-export type { SqlJsDatabase, SqlJsStatement } from './adapters/browser.js';
-export { NodeSqliteAdapter } from './adapters/node-sqlite.js';
+export { SQLiteDB } from './db.js';
 
 export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
 
 /**
- * MongoLite class is the main entry point for interacting with the SQLite-backed database.
+ * MongoLite client backed by the `better-sqlite3` native addon.
  *
  * You can construct it with:
- * - A file path string — uses the built-in `node:sqlite` adapter (`NodeSqliteAdapter`).
- *   Requires Node.js 22.5.0+; for older runtimes, import `MongoLite` from
- *   `mongolite-ts/better-sqlite3` instead.
+ * - A file path string — uses the built-in `SQLiteDB` (`better-sqlite3`) adapter.
  * - A `MongoLiteClientOptions` object — uses the built-in adapter with options.
- * - An `IDatabaseAdapter` instance — use a custom adapter such as
- *   `CloudflareDurableObjectAdapter` for Cloudflare Durable Objects.
+ * - An `IDatabaseAdapter` instance — use a custom adapter for other backends.
  */
 export class MongoLite extends MongoLiteBase {
-  /**
-   * Creates a new MongoLite client instance.
-   * @param dbPathOrOptions Path to the SQLite database file, an options object,
-   *                        or an `IDatabaseAdapter` for custom backends.
-   */
   constructor(
     dbPathOrOptions: string | MongoLiteClientOptions | IDatabaseAdapter,
     options: MongoLiteBaseOptions = {}
@@ -56,10 +67,9 @@ export class MongoLite extends MongoLiteBase {
       typeof (dbPathOrOptions as IDatabaseAdapter).exec === 'function' &&
       typeof (dbPathOrOptions as IDatabaseAdapter).close === 'function'
     ) {
-      // Custom adapter (e.g. CloudflareDurableObjectAdapter)
       super(dbPathOrOptions as IDatabaseAdapter, options);
     } else {
-      super(new NodeSqliteAdapter(dbPathOrOptions as string | MongoLiteClientOptions), options);
+      super(new SQLiteDB(dbPathOrOptions as string | MongoLiteClientOptions), options);
     }
   }
 }

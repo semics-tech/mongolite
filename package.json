@@ -14,9 +14,9 @@
       "types": "./dist/cloudflare.d.ts",
       "default": "./dist/cloudflare.js"
     },
-    "./node-sqlite": {
-      "types": "./dist/node-sqlite.d.ts",
-      "default": "./dist/node-sqlite.js"
+    "./better-sqlite3": {
+      "types": "./dist/better-sqlite3.d.ts",
+      "default": "./dist/better-sqlite3.js"
     }
   },
   "bin": {
@@ -74,9 +74,11 @@
   },
   "dependencies": {
     "@types/uuid": "^11.0.0",
-    "better-sqlite3": "^12.1.1",
     "bson": "^7.2.0",
     "uuid": "^14.0.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.1.1"
   },
   "files": [
     "dist/**/*",
