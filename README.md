@@ -13,6 +13,19 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 - You need a lightweight, embedded database for local apps, CLIs, or testing
 - You want simple file-based persistence with zero infrastructure overhead
 
+## How does it compare?
+
+| | MongoLite | lowdb | better-sqlite3 (raw) | NeDB | PouchDB | MongoDB |
+|---|---|---|---|---|---|---|
+| MongoDB query API (`$set`, `$elemMatch`, aggregation...) | ✅ | ❌ (plain object access) | ❌ (raw SQL) | ✅ | ❌ (Mango/CouchDB-style) | ✅ |
+| Runs in the browser | ✅ (sql.js) | ✅ | ❌ (native binding) | ✅ | ✅ (IndexedDB) | ❌ |
+| Runs on the edge (Cloudflare Durable Objects) | ✅ | ❌ | ❌ (native binding) | ❌ | ❌ | ❌ |
+| Zero infrastructure (no server process) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| TypeScript, strict mode | ✅ | ✅ | ✅ | ⚠️ (community types) | ⚠️ (community types) | ✅ |
+| Actively maintained | ✅ | ✅ | ✅ | ❌ (unmaintained) | ⚠️ (slow-moving) | ✅ |
+
+MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
+
 ## Features
 
 - **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate`, and more

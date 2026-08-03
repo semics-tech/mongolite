@@ -45,14 +45,19 @@
     "client",
     "typescript",
     "nosql",
-    "json"
+    "json",
+    "embedded-database",
+    "local-first",
+    "cloudflare-workers",
+    "durable-objects",
+    "sql.js"
   ],
   "author": "Oliver Breeden <oliver@semics.co.uk>",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/semics-tech/mongolite/issues"
   },
-  "homepage": "https://github.com/semics-tech/mongolite-ts#readme",
+  "homepage": "https://github.com/semics-tech/mongolite#readme",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.0",
@@ -79,6 +84,6 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }
