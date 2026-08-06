@@ -24,6 +24,7 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 - **Update operators** — `$set`, `$inc`, `$push`, `$pull`, `$addToSet`, `$mul`, and more
 - **Indexing** — create, list, and drop indexes including unique and compound indexes
 - **Change streams** — real-time change tracking via `collection.watch()`
+- **MongoDB sync** — replicate local writes upstream, surviving restarts and offline periods
 - **JSON safety** — validates documents before insert, and a corrupted row can't break queries for the rest of the collection
 - **TypeScript** — fully typed with strict mode
 
@@ -88,6 +89,7 @@ MongoLite's niche: the MongoDB query API you already know, running anywhere SQLi
 |-------|-------------|
 | [API Reference](./docs/API.md) | Full API docs: methods, query operators, update operators |
 | [Change Streams](./docs/CHANGE_STREAMS.md) | Real-time change tracking with `collection.watch()` |
+| [Syncing to MongoDB](./docs/SYNC.md) | One-way replication from a local database to an upstream MongoDB |
 | [JSON Safety](./docs/JSON_SAFETY.md) | Document validation and corrupted data recovery |
 | [Query Debugger](./docs/DEBUGGER.md) | Interactive CLI for debugging queries and inspecting SQL |
 | [Benchmarks](./docs/BENCHMARKS.md) | Performance benchmarks and storage characteristics |
@@ -234,6 +236,42 @@ export class MyDurableObject extends DurableObject {
 ```
 
 > See [docs/CLOUDFLARE.md](./docs/CLOUDFLARE.md) for the full guide, supported operations, and limitations.
+
+## Syncing to MongoDB
+
+Point MongoLite at an upstream MongoDB deployment and every insert, update and
+delete is replicated to it. The local database becomes a local-first write layer
+that converges upstream — through restarts, network outages and offline periods.
+
+Requires the optional `mongodb` peer dependency (`npm install mongodb`).
+
+```typescript
+const client = new MongoLite('./app.sqlite');
+await client.connect();
+
+const sync = client.syncToMongo({
+  connectionString: 'mongodb+srv://user:pass@cluster.example.com/app',
+  collections: ['users', 'orders'],   // Omit to replicate everything
+});
+
+await sync.start();
+
+// Ordinary writes — replication happens in the background.
+await client.collection('users').insertOne({ name: 'Alice', age: 30 });
+
+await sync.stop({ flush: true });     // Push anything still queued on shutdown
+```
+
+Changes are captured by SQLite triggers into a durable outbox **inside the same
+transaction as the write itself**, so a change is either committed locally *and*
+queued for replication, or neither. A background worker coalesces the queue,
+applies it as idempotent bulk upserts, and only then advances a persisted
+checkpoint — so an outage parks the backlog rather than losing it, and a restart
+resumes exactly where it stopped.
+
+> See [docs/SYNC.md](./docs/SYNC.md) for the full guide: advanced authentication
+> (X.509, mTLS, AWS IAM), filtering and reshaping documents, dead-letter
+> handling, multiple upstreams, and custom sinks.
 
 ## Development
 

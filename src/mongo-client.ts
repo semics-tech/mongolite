@@ -11,6 +11,8 @@
 import type { IDatabaseAdapter } from './db.js';
 import { MongoLiteCollection } from './collection.js';
 import { DocumentWithId } from './types.js';
+import { SyncReplicator } from './sync/replicator.js';
+import type { SyncOptions, SyncSink } from './sync/types.js';
 
 export type { IDatabaseAdapter };
 
@@ -65,12 +67,29 @@ export class MongoLite {
   listCollections(): { toArray: () => Promise<string[]> } {
     return {
       toArray: async () => {
+        // `__mongolite*` tables are internal bookkeeping (change log, sync
+        // outbox and checkpoints), not user collections.
         const result = await this.db.all<{ name: string }>(
-          `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
+          `SELECT name FROM sqlite_master
+           WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__mongolite%'`
         );
         return result.map((row) => row.name);
       },
     };
+  }
+
+  /**
+   * Starts replicating this database's changes to an upstream {@link SyncSink}.
+   *
+   * Node.js users replicating to MongoDB should prefer the `syncToMongo`
+   * overload on the package-root `MongoLite`, which takes a connection string
+   * directly. This method is the backend-agnostic form — pass any sink to
+   * replicate over HTTP, into a queue, or to a test double.
+   *
+   * The returned replicator is **not** started; call `start()` on it.
+   */
+  createSync(sink: SyncSink, options: SyncOptions = {}): SyncReplicator {
+    return new SyncReplicator(this.db, sink, { verbose: this.options.verbose, ...options });
   }
 
   /**

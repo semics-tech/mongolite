@@ -35,6 +35,31 @@ Gets a reference to a collection (table).
 - `name`: The name of the collection.
 - Returns a `MongoLiteCollection` instance.
 
+### `syncToMongo(options: MongoSyncOptions): SyncReplicator`
+
+Replicates every insert, update and delete to an upstream MongoDB deployment.
+Requires the optional `mongodb` peer dependency.
+
+- `options.connectionString`: Upstream connection string (required).
+- `options.collections` / `exclude` / `collectionMap`: What to replicate, and under what names.
+- Returns a `SyncReplicator` — call `start()` on it.
+
+```typescript
+const sync = client.syncToMongo({ connectionString: process.env.MONGO_URL! });
+await sync.start();
+// …
+await sync.stop({ flush: true });
+```
+
+See [Syncing to MongoDB](./SYNC.md) for the full option list, authentication,
+resilience behaviour and monitoring.
+
+### `createSync(sink: SyncSink, options?: SyncOptions): SyncReplicator`
+
+The backend-agnostic form of the above. Pass any `SyncSink` implementation to
+replicate to something other than a MongoDB deployment — an HTTP API, a queue,
+or a test double.
+
 ---
 
 ## `MongoLiteCollection<T>`

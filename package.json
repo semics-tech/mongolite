@@ -79,6 +79,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.1.3",
     "expect": "^30.0.0",
+    "mongodb": "^7.5.0",
     "mongodb-memory-server": "^11.2.0",
     "prettier": "^3.2.5",
     "tsx": "^4.19.4",
@@ -91,6 +92,14 @@
   },
   "optionalDependencies": {
     "better-sqlite3": "^13.0.2"
+  },
+  "peerDependencies": {
+    "mongodb": ">=6"
+  },
+  "peerDependenciesMeta": {
+    "mongodb": {
+      "optional": true
+    }
   },
   "files": [
     "dist/**/*",
