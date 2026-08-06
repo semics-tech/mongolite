@@ -811,9 +811,10 @@ export class Explorer {
     if (!schema) return current;
 
     info(style.grey(`  Current columns: ${current.join(', ')}`));
+    // No defaultValue: `text` substitutes it for a blank line, which would make
+    // "blank for all fields" mean "keep what you already have".
     const raw = await text({
       message: 'Columns to show (comma separated, blank for all fields)',
-      defaultValue: current.join(', '),
       allowEmpty: true,
       hint: style.grey(`  available: ${schema.fields.map((field) => field.path).join(', ')}`),
     });
