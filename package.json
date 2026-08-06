@@ -24,6 +24,7 @@
     }
   },
   "bin": {
+    "mongolite": "dist/bin/mongolite.js",
     "mongolite-debug": "dist/bin/mongolite-debug.js"
   },
   "scripts": {
