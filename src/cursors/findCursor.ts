@@ -875,6 +875,27 @@ export class FindCursor<T extends DocumentWithId> {
    * @returns A promise that resolves to an array of documents.
    */
   public async toArray(): Promise<T[]> {
+    const { sql: finalSql, params: finalParams } = this.toSQL();
+
+    // Handle malformed json in the database
+    const rows = await this.db.all<SQLiteRow>(finalSql, finalParams);
+    return rows.map((row) => {
+      const parsedData = safeJsonParse(row.data, `findCursor toArray for document ${row._id}`);
+      const restoredData = restoreDates(parsedData) as Record<string, unknown>;
+      const doc = { _id: row._id, ...restoredData } as T;
+      return this.applyProjection(doc);
+    });
+  }
+
+  /**
+   * Returns the SQL this cursor will execute, along with its bound parameters.
+   *
+   * Useful for debugging and for tools that want to show how a MongoDB-style
+   * filter was translated. Reflects any `sort`, `limit` and `skip` applied so
+   * far; `project` is applied in JavaScript after the rows come back and so
+   * does not appear here.
+   */
+  public toSQL(): { sql: string; params: unknown[] } {
     let finalSql = this.queryParts.sql;
     const finalParams = [...this.queryParts.params];
 
@@ -905,14 +926,7 @@ export class FindCursor<T extends DocumentWithId> {
       finalParams.push(this.skipCount);
     }
 
-    // Handle malformed json in the database
-    const rows = await this.db.all<SQLiteRow>(finalSql, finalParams);
-    return rows.map((row) => {
-      const parsedData = safeJsonParse(row.data, `findCursor toArray for document ${row._id}`);
-      const restoredData = restoreDates(parsedData) as Record<string, unknown>;
-      const doc = { _id: row._id, ...restoredData } as T;
-      return this.applyProjection(doc);
-    });
+    return { sql: finalSql, params: finalParams };
   }
 
   /**
