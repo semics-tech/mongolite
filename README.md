@@ -264,10 +264,13 @@ await sync.stop({ flush: true });     // Push anything still queued on shutdown
 
 Changes are captured by SQLite triggers into a durable outbox **inside the same
 transaction as the write itself**, so a change is either committed locally *and*
-queued for replication, or neither. A background worker coalesces the queue,
-applies it as idempotent bulk upserts, and only then advances a persisted
-checkpoint — so an outage parks the backlog rather than losing it, and a restart
-resumes exactly where it stopped.
+queued for replication, or neither. A background worker coalesces the queue, applies
+it upstream, and only then advances a persisted checkpoint — so an outage parks the
+backlog rather than losing it, and a restart resumes exactly where it stopped.
+
+Upstream is treated as the source of truth. Each push is a conditional write against
+the version it last saw, and carries only the fields that actually changed, so a
+concurrent edit by another writer is detected rather than silently overwritten.
 
 > See [docs/SYNC.md](./docs/SYNC.md) for the full guide: advanced authentication
 > (X.509, mTLS, AWS IAM), filtering and reshaping documents, dead-letter

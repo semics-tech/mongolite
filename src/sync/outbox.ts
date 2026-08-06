@@ -335,6 +335,37 @@ export class SyncOutbox {
     return result.changes;
   }
 
+  /**
+   * Appends a change back onto the log so it is retried on a later drain.
+   *
+   * Used when a conflict is resolved in favour of the local version: the shadow has
+   * since been refreshed, so the replayed push diffs against current upstream state and
+   * carries the version it actually lost to.
+   */
+  async requeue(
+    collection: string,
+    documentId: string,
+    document: Record<string, unknown> | null
+  ): Promise<void> {
+    await this.ensureSchema();
+
+    // `_id` lives in its own column locally and is re-attached on read, so it is
+    // stripped here to match what the capture triggers store.
+    let payload: string | null = null;
+    if (document) {
+      const rest = { ...document };
+      delete rest._id;
+      payload = JSON.stringify(rest);
+    }
+
+    await this.db.run(
+      `INSERT INTO ${OUTBOX_TABLE}
+         (collection_name, document_id, operation, full_document, captured_at)
+       VALUES (?, ?, ?, ?, ${NOW_MS_SQL})`,
+      [collection, documentId, document ? 'update' : 'delete', payload]
+    );
+  }
+
   /** Moves a permanently-rejected change out of the stream so it cannot stall replication. */
   async deadLetter(
     replicator: string,

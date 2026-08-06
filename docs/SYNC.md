@@ -5,7 +5,10 @@ deployment. Point it at a connection string and the local database becomes a
 local-first write layer that converges upstream — including across process
 restarts, network outages and offline periods.
 
-Replication is **one-way**: local → upstream. Nothing is read back down.
+Replication is **one-way**: local → upstream. Upstream changes are not streamed back
+down — but the upstream is still treated as authoritative. Every push is a conditional
+write against the version it last saw, so a concurrent edit by another writer is
+detected and wins rather than being silently overwritten.
 
 ```typescript
 import { MongoLite } from '@semics-tech/mongolite';
@@ -51,37 +54,86 @@ file.
 
 1. **Capture.** SQLite `AFTER INSERT/UPDATE/DELETE` triggers append a row to
    `__mongolite_sync_outbox__`. Because a trigger runs inside the same
-   transaction as the write, a change is either committed locally *and* queued
+   transaction as the write, a change is either committed locally _and_ queued
    for replication, or neither. There is no window where a write is durable but
    unrecorded.
 2. **Coalesce.** A run of changes to one document collapses into the single
    operation that realises its final state. Ten updates to the same document
    become one upstream write.
-3. **Apply.** Each batch goes upstream as one `bulkWrite` per collection —
-   `replaceOne` with `upsert` for live documents, `deleteOne` for removed ones.
+3. **Apply.** Each batch goes upstream as one `bulkWrite` per collection, as
+   conditional updates keyed by `_id` and the version last seen — see
+   [Conflict detection](#conflict-detection).
 4. **Acknowledge.** Only after the upstream accepts the batch is the checkpoint
    advanced, in a single atomic statement. Rows every replicator has passed are
    then pruned.
 
 ### Delivery guarantees
 
-Delivery is **at-least-once**, and every operation is idempotent — `replaceOne`
-by `_id` with `upsert`, or `deleteOne` by `_id`. Replaying a batch reproduces
-exactly the same upstream state, which is what makes it safe to acknowledge
-*after* the upstream write instead of before: a crash in the window between the
-two costs a duplicate write, never a lost one.
+Delivery is **at-least-once**, and every operation is idempotent by `_id`.
+Replaying a batch reproduces exactly the same upstream state, which is what makes
+it safe to acknowledge _after_ the upstream write instead of before: a crash in
+the window between the two costs a duplicate write, never a lost one. (A replayed
+conditional update whose version already advanced simply reports a conflict, and
+the replicator reconciles it.)
 
 The practical guarantee is **convergence**: once the outbox drains, upstream
 matches local. Ordering is preserved across batches, and within a batch every
 operation touches a distinct document, so unordered application is safe.
 
-### Why full documents, not update operators
+### Conflict detection
 
-Each replicated write carries the whole document rather than replaying the
-`$set`/`$unset` that produced it. That makes replication idempotent and lets a
-backlog be compacted, and it means a field you delete locally also disappears
-upstream. The cost is that the local database is treated as authoritative:
-**concurrent edits to the same document upstream will be overwritten.**
+Every upstream document carries two fields replication maintains:
+
+| Field        | Purpose                                             |
+| ------------ | --------------------------------------------------- |
+| `_v`         | Monotonic version. Every push is conditional on it. |
+| `_updatedAt` | Server-stamped write time, via `$currentDate`.      |
+
+A push is a compare-and-swap:
+
+```js
+updateOne(
+  { _id, _v: 7 },                                   // the revision we last saw
+  { $set: …, $unset: …, $inc: { _v: 1 }, $currentDate: { _updatedAt: true } }
+)
+```
+
+If another writer has moved the document on, the predicate matches nothing and the
+push is reported as a **conflict** rather than landing. Note that a lost
+compare-and-swap raises no error — it is a silent zero-match — which is why sinks must
+report conflicts explicitly rather than relying on exceptions.
+
+A **version**, not a timestamp, is what makes this correct. Consider: client A reads
+v1, client B writes v2, then A writes based on its stale v1. A's write is _later_, so
+any timestamp comparison hands it the win and B's change is lost. Only a version can
+detect that A never saw v2. `_updatedAt` exists for change discovery and observability,
+never as the arbiter — which also means device clock skew cannot affect correctness.
+
+Set `versioning: false` to opt out and restore unconditional whole-document
+replacement. Only appropriate when nothing else writes to the upstream.
+
+### Why field-level diffs
+
+Pushes carry `$set`/`$unset` of only what changed, computed against a **shadow copy** of
+the last-known server document held locally.
+
+This is not an optimisation — it is what keeps the upstream intact. MongoLite stores
+documents as plain JSON, so a `Date` becomes an ISO string, an `ObjectId` becomes hex,
+and `Binary`/`Decimal128` degrade into unusable structural objects. Pushing whole
+documents would write that degraded form back over the real one. Diffing against the
+shadow means a field the application never touched is _absent from the push_, so its
+upstream BSON value is never rewritten.
+
+It also means a local edit to one field no longer clobbers fields another writer
+changed.
+
+Two consequences worth knowing:
+
+- **Arrays are atomic.** Any change to an array replaces the whole array. Positional
+  array diffing goes wrong as soon as elements are inserted or reordered, and a wrong
+  answer silently corrupts data.
+- **The shadow roughly doubles local database size**, since each replicated document is
+  stored twice: once as the local document, once as the last-known server state.
 
 ## Resilience
 
@@ -110,9 +162,8 @@ for (const entry of failed) {
 
 **The outbox is bounded.** If a long outage pushes it past `maxOutboxSize`
 (default 100,000 rows), superseded revisions are dropped, keeping the newest row
-per document. Compaction is lossless here precisely because replication is
-full-document last-write-wins — a hot document rewritten a million times offline
-still costs one row.
+per document. Compaction is lossless because only the newest local state is ever
+pushed — a hot document rewritten a million times offline still costs one row.
 
 ## Options
 
@@ -120,28 +171,32 @@ still costs one row.
 const sync = client.syncToMongo({
   // — Upstream —
   connectionString: 'mongodb+srv://cluster.example.com',
-  database: 'app',                    // Defaults to the connection string's path
-  writeConcern: { w: 'majority' },    // Default; a batch is checkpointed only once it survives upstream
+  database: 'app', // Defaults to the connection string's path
+  writeConcern: { w: 'majority' }, // Default; a batch is checkpointed only once it survives upstream
 
   // — What to replicate —
-  collections: ['users', 'orders'],   // Omit for every collection, including ones created later
+  collections: ['users', 'orders'], // Omit for every collection, including ones created later
   exclude: ['sessions'],
   collectionMap: { users: 'app_users' },
   transform: (doc) => ({ ...doc, syncedFrom: 'edge-1' }),
 
   // — Behaviour —
-  name: 'default',                    // Checkpoint identity; distinct names for multiple upstreams
-  initial: 'backfill',                // Or 'changes-only' to ignore pre-existing documents
-  idMapping: 'auto',                  // Or 'string' to keep `_id` values as strings
+  name: 'default', // Checkpoint identity; distinct names for multiple upstreams
+  initial: 'backfill', // Or 'changes-only' to ignore pre-existing documents
+  idMapping: 'auto', // Or 'string' to keep `_id` values as strings
   batchSize: 500,
   pollIntervalMs: 250,
+
+  // — Concurrency —
+  versioning: true, // Conditional writes against `_v`. Default
+  onConflict: (ctx) => 'server', // Or 'local' to force, 'skip' to abandon
 
   // — Failure handling —
   retryDelayMs: 500,
   maxRetryDelayMs: 30_000,
   maxRetries: Infinity,
   maxOutboxSize: 100_000,
-  overflowStrategy: 'compact',        // Or 'warn' to leave the backlog alone
+  overflowStrategy: 'compact', // Or 'warn' to leave the backlog alone
 });
 ```
 
@@ -151,7 +206,7 @@ MongoLite stores `_id` as a string; MongoDB conventionally uses `ObjectId`. With
 the default `idMapping: 'auto'`, a 24-character hex id is written upstream as a
 real `ObjectId` and anything else stays a string, so replicated documents are
 indistinguishable from natively written ones. Use `'string'` when ids that merely
-*look* like ObjectIds should stay strings.
+_look_ like ObjectIds should stay strings.
 
 ### Filtering and reshaping
 
@@ -170,6 +225,45 @@ transform: (doc, { sourceCollection }) => {
 Deletes are not passed through `transform` — only an `_id` is needed to remove a
 document. A document previously filtered out is simply deleted from a collection
 it was never written to, which MongoDB treats as a no-op.
+
+## Handling conflicts
+
+When a push loses a race, the shadow is refreshed from the upstream first, so the
+decision is made against current state rather than the version that already lost.
+
+```typescript
+const sync = client.syncToMongo({
+  connectionString: process.env.MONGO_URL!,
+  onConflict: ({ documentId, localDocument, serverDocument, serverVersion }) => {
+    console.warn(`${documentId} changed upstream (now v${serverVersion})`);
+    return 'server'; // discard the local edit — the default
+  },
+});
+
+sync.on('conflict', ({ documentId, reason, resolution }) => {
+  metrics.increment('sync.conflict', { reason, resolution });
+});
+```
+
+| Resolution             | Effect                                                                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `'server'` _(default)_ | The upstream version wins **and is written into the local collection**, so the next local edit starts from it. |
+| `'local'`              | The change is re-queued against the refreshed version and pushed again, overwriting the other writer.          |
+| `'skip'`               | Both sides are left alone; the local change is dropped without retrying.                                       |
+
+`'server'` updating the local document is deliberate. Without it the local row would
+keep the value that just lost, and the next local edit would push it straight back
+up — the conflict would only ever be deferred, never resolved.
+
+Conflicts are counted in `status().conflicts` and are **never dead-lettered** — a
+conflict is a normal outcome to reconcile, not a poison document.
+
+### What versioning cannot protect against
+
+`_v` only guards against writers that participate in the protocol. An application that
+writes to the collection directly without incrementing `_v` will not be detected, and
+its change can be overwritten. If every writer goes through this library — or through
+the same compare-and-swap convention — that gap does not arise.
 
 ## Authentication
 
@@ -215,12 +309,24 @@ client.syncToMongo({
 ## Monitoring
 
 ```typescript
-sync.on('batch', ({ applied, deadLettered, checkpoint }) => { /* … */ });
-sync.on('retry', ({ attempt, retryInMs, error }) => { /* upstream degraded */ });
-sync.on('deadLetter', (entry) => { /* needs a human */ });
-sync.on('overflow', ({ pending, compacted }) => { /* long outage */ });
-sync.on('drained', ({ checkpoint }) => { /* fully caught up */ });
-sync.on('error', (err) => { /* replication stopped */ });
+sync.on('batch', ({ applied, deadLettered, checkpoint }) => {
+  /* … */
+});
+sync.on('retry', ({ attempt, retryInMs, error }) => {
+  /* upstream degraded */
+});
+sync.on('deadLetter', (entry) => {
+  /* needs a human */
+});
+sync.on('overflow', ({ pending, compacted }) => {
+  /* long outage */
+});
+sync.on('drained', ({ checkpoint }) => {
+  /* fully caught up */
+});
+sync.on('error', (err) => {
+  /* replication stopped */
+});
 
 const status = await sync.status();
 // { running, connected, checkpoint, pending, applied, retries, deadLettered, … }
@@ -229,7 +335,7 @@ const status = await sync.status();
 Register an `error` listener if you rely on `maxRetries`: without one, a
 replicator that gives up logs to the console instead.
 
-`await sync.waitForDrain()` resolves once everything written *before the call*
+`await sync.waitForDrain()` resolves once everything written _before the call_
 has reached the upstream — useful in tests and before a controlled shutdown.
 
 ## Latency
@@ -238,7 +344,7 @@ The replicator polls the outbox every `pollIntervalMs` (250ms by default), so
 that bounds worst-case replication latency. Two ways to tighten it:
 
 ```typescript
-sync.notify();                   // Check now — call after a write that matters
+sync.notify(); // Check now — call after a write that matters
 client.syncToMongo({ pollIntervalMs: 50 });
 ```
 
@@ -248,7 +354,7 @@ than making every idle cycle busier.
 ## Multiple upstreams
 
 Replicators sharing one database each keep their own checkpoint, and outbox rows
-are pruned only once *every* registered replicator has passed them.
+are pruned only once _every_ registered replicator has passed them.
 
 ```typescript
 const primary = client.syncToMongo({ name: 'primary', connectionString: PRIMARY });
@@ -314,17 +420,23 @@ dead-lettered instead of blocking the stream.
 
 Replication adds three tables, all excluded from `listCollections()`:
 
-| Table | Purpose |
-| --- | --- |
-| `__mongolite_sync_outbox__` | Captured changes awaiting replication |
-| `__mongolite_sync_state__` | Per-replicator checkpoint and backfill progress |
-| `__mongolite_sync_deadletter__` | Permanently rejected changes, kept for inspection |
+| Table                           | Purpose                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------- |
+| `__mongolite_sync_outbox__`     | Captured changes awaiting replication                                      |
+| `__mongolite_sync_state__`      | Per-replicator checkpoint and backfill progress                            |
+| `__mongolite_sync_deadletter__` | Permanently rejected changes, kept for inspection                          |
+| `__mongolite_sync_shadow__`     | Last-known upstream state per document, for diffing and conflict detection |
 
 ## Limitations
 
-- **One-way.** Upstream changes are not pulled back down.
-- **Last-write-wins.** The local database is authoritative; concurrent upstream
-  edits to the same document are overwritten. There is no conflict resolution.
+- **One-way.** Upstream changes are not streamed back down. A document is pulled down
+  only when a push to it conflicts, so a local copy can be stale until something tries
+  to write to it.
+- **Cooperative versioning.** `_v` detects concurrent writers that use the same
+  protocol. A foreign application writing directly without incrementing `_v` is not
+  detected.
+- **Arrays are replaced whole**, never diffed positionally.
+- **The shadow doubles local storage** for replicated documents.
 - **Document-level granularity.** Whole documents are replicated, not field
   deltas. Very large documents cost proportionally more bandwidth.
 - **Deletes need triggers installed.** A document deleted while its collection

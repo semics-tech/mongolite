@@ -42,6 +42,13 @@ async function main(): Promise<void> {
       return safe;
     },
 
+    // The upstream is the source of truth: if another writer got there first, keep
+    // their version and let the application know rather than overwriting it.
+    onConflict: ({ documentId, serverVersion }) => {
+      console.warn(`${documentId} changed upstream (now v${serverVersion}) — keeping theirs`);
+      return 'server';
+    },
+
     verbose: true,
   });
 
@@ -53,6 +60,9 @@ async function main(): Promise<void> {
   });
   sync.on('deadLetter', (entry) => {
     console.error(`rejected upstream: ${entry.collection}/${entry.documentId} — ${entry.error}`);
+  });
+  sync.on('conflict', ({ collection, documentId, reason, resolution }) => {
+    console.warn(`conflict on ${collection}/${documentId} (${reason}) resolved as "${resolution}"`);
   });
   sync.on('error', (err) => {
     console.error('replication stopped:', err.message);

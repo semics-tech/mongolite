@@ -29,10 +29,19 @@ interface Recorded {
   options?: Record<string, unknown>;
 }
 
-function createFakeDriver(options: { failWith?: unknown } = {}) {
+function createFakeDriver(
+  options: {
+    failWith?: unknown;
+    /** Counts the server reports back, overriding the "everything landed" default. */
+    result?: Record<string, number>;
+    /** Documents the collection contains, keyed by `_id`, for re-reads after a miss. */
+    upstream?: Record<string, Record<string, unknown>>;
+  } = {}
+) {
   const recorded: Recorded[] = [];
   const clientOptions: Array<Record<string, unknown> | undefined> = [];
   const uris: string[] = [];
+  const queries: Array<Record<string, unknown>> = [];
 
   class FakeMongoClient {
     constructor(uri: string, opts?: Record<string, unknown>) {
@@ -47,7 +56,17 @@ function createFakeDriver(options: { failWith?: unknown } = {}) {
           bulkWrite: async (operations: unknown[], opts?: Record<string, unknown>) => {
             recorded.push({ collection: `${name ?? ''}.${collection}`, operations, options: opts });
             if (options.failWith) throw options.failWith;
-            return { upsertedCount: operations.length };
+            return options.result ?? { matchedCount: operations.length, upsertedCount: 0 };
+          },
+          find: (filter: Record<string, unknown>) => {
+            queries.push(filter);
+            const ids = ((filter._id as { $in?: unknown[] })?.$in ?? []).map(String);
+            return {
+              toArray: async () =>
+                ids
+                  .map((id) => options.upstream?.[id])
+                  .filter((doc): doc is Record<string, unknown> => Boolean(doc)),
+            };
           },
         }),
       };
@@ -59,6 +78,7 @@ function createFakeDriver(options: { failWith?: unknown } = {}) {
     recorded,
     clientOptions,
     uris,
+    queries,
   };
 }
 
@@ -73,8 +93,8 @@ function upsert(documentId: string, document: Record<string, unknown>): SyncOper
   };
 }
 
-test('MongoSink - upserts replace the whole document, keyed by _id', async () => {
-  const fake = createFakeDriver();
+test('MongoSink - a document never seen upstream is created without overwriting', async () => {
+  const fake = createFakeDriver({ result: { matchedCount: 0, upsertedCount: 1 } });
   const sink = new MongoUpstreamSink({
     connectionString: 'mongodb://localhost:27017',
     database: 'app',
@@ -86,11 +106,96 @@ test('MongoSink - upserts replace the whole document, keyed by _id', async () =>
 
   expect(result.applied).toBe(1);
   expect(result.failures).toBeUndefined();
-  expect(fake.recorded).toHaveLength(1);
+  expect(result.conflicts).toBeUndefined();
   expect(fake.recorded[0].collection).toBe('app.users');
 
-  // `replaceOne` + `upsert` is what makes a replay idempotent: re-running the
-  // same batch lands on the same upstream state.
+  // `$setOnInsert` means an existing upstream document is left alone rather than
+  // clobbered — the local store does not get to overwrite what it never read.
+  expect(fake.recorded[0].operations[0]).toEqual({
+    updateOne: {
+      filter: { _id: 'user-1' },
+      update: {
+        $setOnInsert: { name: 'Alice', _v: 1 },
+        $currentDate: { _updatedAt: true },
+      },
+      upsert: true,
+    },
+  });
+});
+
+test('MongoSink - a known revision is updated conditionally, with only the changed fields', async () => {
+  const fake = createFakeDriver({ result: { matchedCount: 1 } });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    database: 'app',
+    driver: fake.driver,
+  });
+
+  await sink.apply([
+    {
+      ...upsert('user-1', { name: 'Alice', age: 31 }),
+      baseVersion: 7,
+      diff: { set: { age: 31 }, unset: ['nickname'] },
+    },
+  ]);
+
+  // The `_v: 7` predicate is the whole point: if another writer moved the document
+  // on, this matches nothing instead of silently overwriting their change.
+  expect(fake.recorded[0].operations[0]).toEqual({
+    updateOne: {
+      filter: { _id: 'user-1', _v: 7 },
+      update: {
+        $inc: { _v: 1 },
+        $currentDate: { _updatedAt: true },
+        $set: { age: 31 },
+        $unset: { nickname: '' },
+      },
+    },
+  });
+});
+
+test('MongoSink - a conditional write that matches nothing is reported as a conflict', async () => {
+  const fake = createFakeDriver({
+    // The server moved on: our `_v: 7` predicate matched no document.
+    result: { matchedCount: 0 },
+    upstream: { 'user-1': { _id: 'user-1', name: 'Changed by someone else', _v: 9 } },
+  });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    driver: fake.driver,
+  });
+
+  const result = await sink.apply([
+    {
+      ...upsert('user-1', { name: 'Alice' }),
+      baseVersion: 7,
+      diff: { set: { name: 'Alice' }, unset: [] },
+    },
+  ]);
+
+  expect(result.applied).toBe(0);
+  // Crucially not a failure: a conflict is reconciled, never dead-lettered.
+  expect(result.failures).toBeUndefined();
+  expect(result.conflicts).toEqual([
+    {
+      index: 0,
+      reason: 'version-mismatch',
+      serverDocument: { _id: 'user-1', name: 'Changed by someone else', _v: 9 },
+      serverVersion: 9,
+    },
+  ]);
+});
+
+test('MongoSink - versioning off restores unconditional whole-document replacement', async () => {
+  const fake = createFakeDriver();
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    versioning: false,
+    driver: fake.driver,
+  });
+
+  await sink.apply([upsert('user-1', { name: 'Alice' })]);
+
   expect(fake.recorded[0].operations[0]).toEqual({
     replaceOne: {
       filter: { _id: 'user-1' },
@@ -98,6 +203,23 @@ test('MongoSink - upserts replace the whole document, keyed by _id', async () =>
       upsert: true,
     },
   });
+});
+
+test('MongoSink - fetch reads documents back by _id', async () => {
+  const fake = createFakeDriver({
+    upstream: { a: { _id: 'a', name: 'Alice' }, b: { _id: 'b', name: 'Bob' } },
+  });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    driver: fake.driver,
+  });
+
+  const documents = await sink.fetch('users', ['a', 'missing', 'b']);
+
+  expect(documents).toEqual([
+    { _id: 'a', name: 'Alice' },
+    { _id: 'b', name: 'Bob' },
+  ]);
 });
 
 test('MongoSink - deletes are keyed by _id alone', async () => {
@@ -132,10 +254,10 @@ test('MongoSink - ObjectId-shaped ids become ObjectIds, others stay strings', as
     upsert('user-alice', { name: 'Bob' }),
   ]);
 
-  const writes = fake.recorded[0].operations as Array<{ replaceOne: { filter: { _id: unknown } } }>;
-  expect(writes[0].replaceOne.filter._id).toBeInstanceOf(FakeObjectId);
-  expect(String(writes[0].replaceOne.filter._id)).toBe('507f1f77bcf86cd799439011');
-  expect(writes[1].replaceOne.filter._id).toBe('user-alice');
+  const writes = fake.recorded[0].operations as Array<{ updateOne: { filter: { _id: unknown } } }>;
+  expect(writes[0].updateOne.filter._id).toBeInstanceOf(FakeObjectId);
+  expect(String(writes[0].updateOne.filter._id)).toBe('507f1f77bcf86cd799439011');
+  expect(writes[1].updateOne.filter._id).toBe('user-alice');
 });
 
 test('MongoSink - idMapping "string" leaves every id as a string', async () => {
@@ -148,8 +270,8 @@ test('MongoSink - idMapping "string" leaves every id as a string', async () => {
 
   await sink.apply([upsert('507f1f77bcf86cd799439011', { name: 'Alice' })]);
 
-  const writes = fake.recorded[0].operations as Array<{ replaceOne: { filter: { _id: unknown } } }>;
-  expect(writes[0].replaceOne.filter._id).toBe('507f1f77bcf86cd799439011');
+  const writes = fake.recorded[0].operations as Array<{ updateOne: { filter: { _id: unknown } } }>;
+  expect(writes[0].updateOne.filter._id).toBe('507f1f77bcf86cd799439011');
 });
 
 test('MongoSink - operations are grouped into one bulkWrite per collection', async () => {

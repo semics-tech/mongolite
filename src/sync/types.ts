@@ -8,6 +8,9 @@
  * upstream. Nothing is lost if the process dies or the network is down — the log
  * simply grows until it can be drained.
  */
+import type { DocumentDiff } from './diff.js';
+
+export type { DocumentDiff };
 
 /** The kind of change captured for a document. */
 export type SyncOperationType = 'insert' | 'update' | 'delete';
@@ -50,6 +53,25 @@ export interface SyncOperation {
   document?: Record<string, unknown>;
   /** Outbox id this operation was derived from — the newest row for the document. */
   outboxId: number;
+
+  /**
+   * The upstream `_v` this operation asserts against — the version last seen for this
+   * document. `null` means the document has never been upstream, so the write must
+   * create it rather than replace a known revision.
+   *
+   * A sink turns this into a conditional write; that is what makes a lost race
+   * detectable instead of silently overwriting a concurrent edit.
+   */
+  baseVersion?: number | null;
+
+  /**
+   * The minimal change to apply upstream, relative to the last-known server state.
+   *
+   * Present for `upsert` whenever a shadow exists. Applying this rather than
+   * {@link SyncOperation.document} leaves untouched fields — including BSON values the
+   * local store cannot represent — exactly as they are upstream.
+   */
+  diff?: DocumentDiff;
 }
 
 /** Outcome of applying one batch of operations to the upstream. */
@@ -62,6 +84,62 @@ export interface SyncApplyResult {
    * Indexes refer to positions in the `operations` array passed to `apply`.
    */
   failures?: SyncApplyFailure[];
+  /**
+   * Operations whose conditional write did not match — someone else changed the
+   * document upstream since it was last seen.
+   *
+   * This is a distinct outcome from {@link SyncApplyResult.failures}: a conflict is a
+   * normal thing to reconcile, not a poison document, so it is never dead-lettered.
+   */
+  conflicts?: SyncApplyConflict[];
+}
+
+/** Why a conditional write did not land. */
+export type SyncConflictReason =
+  /** The upstream `_v` had moved on — a concurrent writer got there first. */
+  | 'version-mismatch'
+  /** A document believed to be new already existed upstream. */
+  | 'already-exists'
+  /** A document expected upstream was not there. */
+  | 'missing';
+
+/** An operation that lost a race against another writer. */
+export interface SyncApplyConflict {
+  /** Index into the `operations` array passed to `apply`. */
+  index: number;
+  reason: SyncConflictReason;
+  /** The current upstream document, when the sink was able to read it back. */
+  serverDocument?: Record<string, unknown>;
+  /** The current upstream `_v`, when known. */
+  serverVersion?: number | null;
+}
+
+/** What to do about a document that changed upstream and locally at the same time. */
+export type SyncConflictResolution =
+  /** Keep the upstream version and discard the local change. The default. */
+  | 'server'
+  /** Force the local version upstream, overwriting the other writer's change. */
+  | 'local'
+  /** Leave both sides alone; the local change is dropped without being retried. */
+  | 'skip';
+
+/** Everything known about a conflict, passed to {@link SyncOptions.onConflict}. */
+export interface SyncConflictContext {
+  /** Upstream collection name. */
+  collection: string;
+  /** Local collection the change originated in. */
+  sourceCollection: string;
+  documentId: string;
+  operation: 'upsert' | 'delete';
+  reason: SyncConflictReason;
+  /** The local document that failed to push. `null` for a delete. */
+  localDocument: Record<string, unknown> | null;
+  /** The current upstream document, if it could be read. */
+  serverDocument: Record<string, unknown> | null;
+  /** The version the push asserted against. */
+  baseVersion: number | null;
+  /** The version actually found upstream. */
+  serverVersion: number | null;
 }
 
 export interface SyncApplyFailure {
@@ -97,6 +175,17 @@ export interface SyncSink {
    * whole stream.
    */
   apply(operations: SyncOperation[]): Promise<SyncApplyResult>;
+
+  /**
+   * Reads documents back from the upstream by `_id`.
+   *
+   * Used to refresh the local shadow after a conflict, so the next push diffs against
+   * current upstream state instead of losing the race again. A sink that cannot read
+   * may omit this — conflict resolution then falls back to dropping the local change.
+   *
+   * Ids that do not exist upstream are simply absent from the result.
+   */
+  fetch?(collection: string, documentIds: string[]): Promise<Record<string, unknown>[]>;
 
   /** Release the upstream connection. */
   close?(): Promise<void>;
@@ -208,6 +297,27 @@ export interface SyncOptions extends SyncCollectionOptions {
    */
   unref?: boolean;
 
+  /**
+   * Guard every push with a conditional write against the document's last-known
+   * upstream `_v`, so a concurrent edit by another writer is detected instead of
+   * silently overwritten. Defaults to `true`.
+   *
+   * Turning this off restores unconditional whole-document replacement: faster and
+   * free of the `_v`/`_updatedAt` fields, but the local database becomes the effective
+   * source of truth. Only appropriate when nothing else writes to the upstream.
+   */
+  versioning?: boolean;
+
+  /**
+   * Called when a push loses a race against another writer.
+   *
+   * Return `'server'` (the default) to keep the upstream version and discard the local
+   * change, `'local'` to force the local version through anyway, or `'skip'` to leave
+   * both sides alone. Either way the local shadow is refreshed from the upstream first,
+   * so the decision is made against current state.
+   */
+  onConflict?: (context: SyncConflictContext) => SyncConflictResolution;
+
   /** Log replicator activity to the console. Defaults to `false`. */
   verbose?: boolean;
 }
@@ -228,6 +338,8 @@ export interface SyncStatus {
   retries: number;
   /** Operations permanently rejected upstream and moved to the dead-letter table. */
   deadLettered: number;
+  /** Pushes that lost a race against another writer since `start()`. */
+  conflicts: number;
   /** Collections currently being watched. */
   collections: string[];
   /** Last error seen, if replication is currently degraded. */
@@ -257,12 +369,24 @@ export interface SyncEvents {
   retry: [{ attempt: number; retryInMs: number; error: Error }];
   /** An operation was permanently rejected and moved to the dead-letter table. */
   deadLetter: [SyncDeadLetter];
+  /** A push lost a race against another writer; `resolution` is what was done about it. */
+  conflict: [SyncConflictContext & { resolution: SyncConflictResolution }];
   /** The outbox exceeded `maxOutboxSize`. */
   overflow: [{ pending: number; limit: number; compacted: number }];
   /** Replication stopped because of an unrecoverable error. */
   error: [Error];
   /** The replicator stopped. */
   stopped: [];
+}
+
+/** Counts returned by a bulk write, used to detect conditional writes that did not match. */
+export interface MongoBulkWriteResultLike {
+  matchedCount?: number;
+  modifiedCount?: number;
+  upsertedCount?: number;
+  deletedCount?: number;
+  /** Present on `MongoBulkWriteError`, mapping input index → generated `_id`. */
+  upsertedIds?: Record<number, unknown>;
 }
 
 /** Minimal shape of the pieces of the `mongodb` driver the sink uses. */
@@ -285,5 +409,9 @@ export interface MongoCollectionLike {
   bulkWrite(
     operations: unknown[],
     options?: Record<string, unknown>
-  ): Promise<{ upsertedCount?: number; modifiedCount?: number; deletedCount?: number }>;
+  ): Promise<MongoBulkWriteResultLike>;
+  find(
+    filter: Record<string, unknown>,
+    options?: Record<string, unknown>
+  ): { toArray(): Promise<Record<string, unknown>[]> };
 }

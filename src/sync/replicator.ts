@@ -17,9 +17,14 @@
  */
 import { EventEmitter } from 'events';
 import type { IDatabaseAdapter } from '../db.js';
+import { applyDiff, computeDiff, isEmptyDiff } from './diff.js';
 import { SyncOutbox } from './outbox.js';
+import { SyncShadow, projectForComparison } from './shadow.js';
 import type {
+  SyncApplyConflict,
   SyncApplyFailure,
+  SyncConflictContext,
+  SyncConflictResolution,
   SyncDeadLetter,
   SyncOperation,
   SyncOptions,
@@ -41,6 +46,7 @@ const DEFAULTS = {
   overflowStrategy: 'compact' as const,
   collectionScanIntervalMs: 5_000,
   unref: false,
+  versioning: true,
   verbose: false,
 };
 
@@ -49,10 +55,11 @@ const BACKFILL_CHUNK_SIZE = 500;
 
 export class SyncReplicator extends EventEmitter {
   private readonly outbox: SyncOutbox;
+  private readonly shadow: SyncShadow;
   private readonly opts: Required<
-    Omit<SyncOptions, 'collections' | 'exclude' | 'collectionMap' | 'transform'>
+    Omit<SyncOptions, 'collections' | 'exclude' | 'collectionMap' | 'transform' | 'onConflict'>
   > &
-    Pick<SyncOptions, 'collections' | 'exclude' | 'collectionMap' | 'transform'>;
+    Pick<SyncOptions, 'collections' | 'exclude' | 'collectionMap' | 'transform' | 'onConflict'>;
 
   private running = false;
   private connected = false;
@@ -64,24 +71,31 @@ export class SyncReplicator extends EventEmitter {
   private appliedCount = 0;
   private retryCount = 0;
   private deadLetterCount = 0;
+  private conflictCount = 0;
   private lastError: string | undefined;
 
   /** Resolves the current sleep early when a local write arrives or `stop()` is called. */
   private wake: (() => void) | null = null;
 
   constructor(
-    db: IDatabaseAdapter,
+    private readonly db: IDatabaseAdapter,
     private readonly sink: SyncSink,
     options: SyncOptions = {}
   ) {
     super();
     this.opts = { ...DEFAULTS, ...stripUndefined(options) };
     this.outbox = new SyncOutbox(db);
+    this.shadow = new SyncShadow(db, this.opts.name);
   }
 
   /** The outbox backing this replicator — for dead-letter inspection and manual maintenance. */
   get log(): SyncOutbox {
     return this.outbox;
+  }
+
+  /** The shadow store holding last-known upstream state — for diagnostics and reseeding. */
+  get baseline(): SyncShadow {
+    return this.shadow;
   }
 
   /**
@@ -96,6 +110,7 @@ export class SyncReplicator extends EventEmitter {
     this.running = true;
 
     await this.outbox.ensureSchema();
+    if (this.opts.versioning) await this.shadow.ensureSchema();
 
     const state = await this.outbox.loadState(this.opts.name);
     this.checkpoint = state.checkpoint;
@@ -204,6 +219,7 @@ export class SyncReplicator extends EventEmitter {
       applied: this.appliedCount,
       retries: this.retryCount,
       deadLettered: this.deadLetterCount,
+      conflicts: this.conflictCount,
       collections: [...this.watched],
       lastError: this.lastError,
     };
@@ -277,25 +293,25 @@ export class SyncReplicator extends EventEmitter {
       for await (const chunk of this.outbox.scanCollection(collection, BACKFILL_CHUNK_SIZE)) {
         if (!this.running) return;
 
-        const operations: SyncOperation[] = [];
-        for (const row of chunk) {
-          if (row.document === null) continue; // Unreadable JSON — skip, the row is already broken locally.
-          const op = this.toOperation({
+        const records: SyncOutboxRecord[] = chunk
+          // Unreadable JSON — skip, the row is already broken locally.
+          .filter((row) => row.document !== null)
+          .map((row) => ({
             id: 0,
             collection,
             documentId: row.documentId,
-            operation: 'insert',
+            operation: 'insert' as const,
             document: row.document,
             capturedAt: Date.now(),
-          });
-          if (op) operations.push(op);
-        }
+          }));
+
+        const operations = await this.buildOperations(records);
 
         if (operations.length > 0) {
-          const failures = await this.applyWithRetry(operations);
-          if (failures === null) return;
+          const outcome = await this.applyWithRetry(operations);
+          if (outcome === null) return;
 
-          for (const failure of failures) {
+          for (const failure of outcome.failures) {
             const op = operations[failure.index];
             if (!op) continue;
             await this.recordDeadLetter(
@@ -311,7 +327,16 @@ export class SyncReplicator extends EventEmitter {
             );
           }
 
-          const applied = operations.length - failures.length;
+          // A document that already exists upstream is not ours to overwrite — the
+          // backfill adopts the server's version instead.
+          const conflicted = new Set(outcome.conflicts.map((conflict) => conflict.index));
+          for (const conflict of outcome.conflicts) {
+            await this.resolveConflict(operations[conflict.index], conflict);
+          }
+
+          await this.commitShadows(operations, outcome.failures, conflicted);
+
+          const applied = operations.length - outcome.failures.length - conflicted.size;
           this.appliedCount += applied;
           count += applied;
         }
@@ -378,17 +403,19 @@ export class SyncReplicator extends EventEmitter {
     }
 
     const highestId = records[records.length - 1].id;
-    const { operations, poison } = this.coalesce(records);
+    const { latest, poison } = this.coalesce(records);
 
     for (const record of poison) {
       await this.recordDeadLetter(record, 'stored document JSON could not be parsed');
     }
 
-    if (operations.length > 0) {
-      const failures = await this.applyWithRetry(operations);
-      if (failures === null) return false; // Stopped mid-batch — leave the checkpoint alone.
+    const operations = await this.buildOperations(latest);
 
-      for (const failure of failures) {
+    if (operations.length > 0) {
+      const outcome = await this.applyWithRetry(operations);
+      if (outcome === null) return false; // Stopped mid-batch — leave the checkpoint alone.
+
+      for (const failure of outcome.failures) {
         const op = operations[failure.index];
         if (!op) continue;
         await this.recordDeadLetter(
@@ -404,14 +431,24 @@ export class SyncReplicator extends EventEmitter {
         );
       }
 
-      this.appliedCount += operations.length - failures.length;
+      const conflicted = new Set(outcome.conflicts.map((conflict) => conflict.index));
+      for (const conflict of outcome.conflicts) {
+        await this.resolveConflict(operations[conflict.index], conflict);
+      }
+
+      // Roll the shadow forward for everything that actually landed, so the next
+      // local edit diffs against the state we just wrote rather than a stale one.
+      await this.commitShadows(operations, outcome.failures, conflicted);
+
+      const applied = operations.length - outcome.failures.length - conflicted.size;
+      this.appliedCount += applied;
 
       // Checkpoint before announcing, so a `batch` listener that inspects
       // progress sees the position the batch actually reached.
       await this.advanceTo(highestId);
       this.emit('batch', {
-        applied: operations.length - failures.length,
-        deadLettered: failures.length,
+        applied,
+        deadLettered: outcome.failures.length,
         checkpoint: highestId,
       });
       return true;
@@ -435,7 +472,7 @@ export class SyncReplicator extends EventEmitter {
    * is its current state — an upsert of the newest revision, or a delete.
    */
   private coalesce(records: SyncOutboxRecord[]): {
-    operations: SyncOperation[];
+    latest: SyncOutboxRecord[];
     poison: SyncOutboxRecord[];
   } {
     const latest = new Map<string, SyncOutboxRecord>();
@@ -445,17 +482,221 @@ export class SyncReplicator extends EventEmitter {
       latest.set(`${record.collection} ${record.documentId}`, record);
     }
 
-    const operations: SyncOperation[] = [];
+    const kept: SyncOutboxRecord[] = [];
     for (const record of latest.values()) {
       if (record.operation !== 'delete' && record.document === null) {
         poison.push(record);
         continue;
       }
-      const op = this.toOperation(record);
-      if (op) operations.push(op);
+      kept.push(record);
     }
 
-    return { operations, poison };
+    return { latest: kept, poison };
+  }
+
+  /**
+   * Turns coalesced records into upstream operations, attaching the base version and
+   * minimal diff from the shadow.
+   *
+   * Shadows load per collection in one query rather than per document, so a batch of
+   * 500 changes costs one extra read per collection, not 500.
+   */
+  private async buildOperations(records: SyncOutboxRecord[]): Promise<SyncOperation[]> {
+    const operations: SyncOperation[] = [];
+    if (records.length === 0) return operations;
+
+    if (!this.opts.versioning) {
+      for (const record of records) {
+        const op = this.toOperation(record);
+        if (op) operations.push(op);
+      }
+      return operations;
+    }
+
+    const byCollection = new Map<string, SyncOutboxRecord[]>();
+    for (const record of records) {
+      const bucket = byCollection.get(record.collection);
+      if (bucket) bucket.push(record);
+      else byCollection.set(record.collection, [record]);
+    }
+
+    for (const [collection, bucket] of byCollection) {
+      const shadows = await this.shadow.load(
+        collection,
+        bucket.map((record) => record.documentId)
+      );
+
+      for (const record of bucket) {
+        const op = this.toOperation(record);
+        if (!op) continue;
+
+        const entry = shadows.get(record.documentId);
+        // No shadow means the document has never been upstream, so the write must
+        // create it rather than claim to replace a revision it never read.
+        op.baseVersion = entry ? entry.baseVersion : null;
+
+        if (op.type === 'upsert' && entry && op.document) {
+          const diff = computeDiff(entry.projection, op.document);
+          // Nothing actually changed relative to upstream — skip rather than burn a
+          // version bump on a no-op write.
+          if (isEmptyDiff(diff)) continue;
+          op.diff = diff;
+        }
+
+        operations.push(op);
+      }
+    }
+
+    return operations;
+  }
+
+  /**
+   * Records the new upstream state for operations that landed.
+   *
+   * The post-write state is computed by applying the diff to the previous *server*
+   * document rather than by re-reading it — one fewer round trip, and it keeps the BSON
+   * values of untouched fields exactly as they were.
+   */
+  private async commitShadows(
+    operations: SyncOperation[],
+    failures: SyncApplyFailure[],
+    conflicted: Set<number>
+  ): Promise<void> {
+    if (!this.opts.versioning) return;
+
+    const failed = new Set(failures.map((failure) => failure.index));
+
+    for (const [index, op] of operations.entries()) {
+      if (failed.has(index) || conflicted.has(index)) continue;
+
+      if (op.type === 'delete') {
+        await this.shadow.remove(op.sourceCollection, op.documentId);
+        continue;
+      }
+
+      const document = op.document ?? {};
+
+      if (op.baseVersion === null || op.baseVersion === undefined) {
+        // Freshly created upstream: the server holds what we sent, at version 1.
+        await this.shadow.put(op.sourceCollection, op.documentId, 1, document);
+        continue;
+      }
+
+      const previous = await this.shadow.load(op.sourceCollection, [op.documentId]);
+      const entry = previous.get(op.documentId);
+      const next = entry && op.diff ? applyDiff(entry.serverDocument, op.diff) : { ...document };
+
+      await this.shadow.put(op.sourceCollection, op.documentId, op.baseVersion + 1, next);
+    }
+  }
+
+  /**
+   * Reconciles a push that lost a race.
+   *
+   * The upstream state goes into the shadow first, so whatever happens next — a retry,
+   * or the application's own decision — is made against current reality rather than
+   * against the version that already lost.
+   */
+  private async resolveConflict(
+    op: SyncOperation | undefined,
+    conflict: SyncApplyConflict
+  ): Promise<void> {
+    if (!op) return;
+
+    this.conflictCount += 1;
+
+    const serverDocument =
+      conflict.serverDocument ?? (await this.fetchUpstream(op.collection, op.documentId));
+    const serverVersion = conflict.serverVersion ?? readVersionField(serverDocument);
+
+    const context: SyncConflictContext = {
+      collection: op.collection,
+      sourceCollection: op.sourceCollection,
+      documentId: op.documentId,
+      operation: op.type,
+      reason: conflict.reason,
+      localDocument: op.document ?? null,
+      serverDocument: serverDocument ?? null,
+      baseVersion: op.baseVersion ?? null,
+      serverVersion,
+    };
+
+    const resolution: SyncConflictResolution = this.opts.onConflict
+      ? this.opts.onConflict(context)
+      : 'server';
+
+    if (serverDocument) {
+      await this.shadow.put(op.sourceCollection, op.documentId, serverVersion, serverDocument);
+    } else {
+      // Gone upstream — drop the shadow so a later local write recreates it.
+      await this.shadow.remove(op.sourceCollection, op.documentId);
+    }
+
+    if (resolution === 'server') {
+      // Adopting the upstream version locally is what makes "server wins" durable.
+      // Without it the local row keeps the value that just lost, and the very next
+      // local edit pushes it straight back up — the conflict would only ever be
+      // deferred, never resolved.
+      await this.adoptUpstream(op.sourceCollection, op.documentId, serverDocument ?? null);
+    }
+
+    if (resolution === 'local') {
+      // Re-queue so the next drain diffs against the refreshed shadow and wins the
+      // second time. Deliberately not retried inline: that could livelock against a
+      // writer actively holding the document.
+      await this.outbox.requeue(op.sourceCollection, op.documentId, op.document ?? null);
+    }
+
+    this.log_(
+      `conflict on ${op.sourceCollection}/${op.documentId} (${conflict.reason}) → ${resolution}`
+    );
+    this.emit('conflict', { ...context, resolution });
+  }
+
+  /**
+   * Writes the upstream version of a document into the local collection.
+   *
+   * The write trips the capture triggers and lands back in the outbox, which would
+   * normally mean pushing it straight back up. It does not, because the local row now
+   * matches the shadow exactly: the diff comes out empty and the echo is dropped in
+   * {@link SyncReplicator.buildOperations}. That is why the local copy is written from
+   * the same projection the diff compares against.
+   */
+  private async adoptUpstream(
+    collection: string,
+    documentId: string,
+    serverDocument: Record<string, unknown> | null
+  ): Promise<void> {
+    const table = `"${collection.replace(/"/g, '""')}"`;
+
+    if (!serverDocument) {
+      await this.db.run(`DELETE FROM ${table} WHERE _id = ?`, [documentId]);
+      return;
+    }
+
+    // `_id` lives in its own column and is re-attached on read.
+    const rest = projectForComparison(serverDocument);
+    delete rest._id;
+
+    await this.db.run(
+      `INSERT INTO ${table} (_id, data) VALUES (?, ?)
+       ON CONFLICT(_id) DO UPDATE SET data = excluded.data`,
+      [documentId, JSON.stringify(rest)]
+    );
+  }
+
+  private async fetchUpstream(
+    collection: string,
+    documentId: string
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!this.sink.fetch) return undefined;
+    try {
+      const documents = await this.sink.fetch(collection, [documentId]);
+      return documents[0];
+    } catch (err) {
+      this.log_(`could not re-read ${collection}/${documentId}: ${describeError(err)}`);
+      return undefined;
+    }
   }
 
   /** Maps an outbox record to an upstream operation, applying rename and transform. */
@@ -503,7 +744,9 @@ export class SyncReplicator extends EventEmitter {
    * The checkpoint is never advanced while this is retrying, so an upstream
    * outage simply parks the batch — the outbox absorbs the backlog.
    */
-  private async applyWithRetry(operations: SyncOperation[]): Promise<SyncApplyFailure[] | null> {
+  private async applyWithRetry(
+    operations: SyncOperation[]
+  ): Promise<{ failures: SyncApplyFailure[]; conflicts: SyncApplyConflict[] } | null> {
     let attempt = 0;
     let delay = this.opts.retryDelayMs;
 
@@ -516,7 +759,7 @@ export class SyncReplicator extends EventEmitter {
         await this.ensureConnected();
         const result = await this.sink.apply(operations);
         this.lastError = undefined;
-        return result.failures ?? [];
+        return { failures: result.failures ?? [], conflicts: result.conflicts ?? [] };
       } catch (err) {
         attempt += 1;
         this.retryCount += 1;
@@ -637,6 +880,13 @@ export class SyncReplicator extends EventEmitter {
       console.log(`[mongolite:sync:${this.opts.name}] ${message}`);
     }
   }
+}
+
+/** Reads `_v` off an upstream document, tolerating its absence. */
+function readVersionField(document: Record<string, unknown> | undefined): number | null {
+  if (!document) return null;
+  const raw = document._v;
+  return typeof raw === 'number' ? raw : null;
 }
 
 function describeError(err: unknown): string {

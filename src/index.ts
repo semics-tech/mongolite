@@ -20,12 +20,27 @@ export { NodeSqliteAdapter } from './adapters/node-sqlite.js';
 import { MongoUpstreamSink, SyncReplicator } from './sync/index.js';
 import type { MongoSinkOptions, SyncOptions } from './sync/index.js';
 
-export { SyncReplicator, SyncOutbox, MongoUpstreamSink } from './sync/index.js';
+export {
+  SyncReplicator,
+  SyncOutbox,
+  SyncShadow,
+  MongoUpstreamSink,
+  computeDiff,
+  applyDiff,
+  isEmptyDiff,
+  projectToLocalShape,
+} from './sync/index.js';
 export type {
+  DocumentDiff,
   MongoSinkOptions,
   MongoUpstreamAuth,
+  ShadowEntry,
+  SyncApplyConflict,
   SyncApplyFailure,
   SyncApplyResult,
+  SyncConflictContext,
+  SyncConflictReason,
+  SyncConflictResolution,
   SyncDeadLetter,
   SyncEvents,
   SyncIdMapping,
@@ -152,6 +167,9 @@ export class MongoLite extends MongoLiteBase {
       tlsAllowInvalidHostnames,
       tlsAllowInvalidCertificates,
       idMapping: syncOptions.idMapping,
+      // The sink builds the conditional writes, so it needs the same answer the
+      // replicator uses when deciding whether to track shadows at all.
+      versioning: syncOptions.versioning,
     });
 
     return this.createSync(sink, syncOptions);

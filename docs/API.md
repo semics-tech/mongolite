@@ -42,6 +42,8 @@ Requires the optional `mongodb` peer dependency.
 
 - `options.connectionString`: Upstream connection string (required).
 - `options.collections` / `exclude` / `collectionMap`: What to replicate, and under what names.
+- `options.onConflict`: What to do when a push loses a race. Defaults to the server winning.
+- `options.versioning`: Conditional writes against `_v`. Defaults to `true`.
 - Returns a `SyncReplicator` — call `start()` on it.
 
 ```typescript

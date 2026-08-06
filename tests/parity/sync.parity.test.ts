@@ -238,6 +238,76 @@ test('Sync parity - collections are renamed upstream and excluded ones stay loca
   }
 });
 
+test('Sync parity - a concurrent server edit is not overwritten by a stale local push', async () => {
+  const h = await createHarness('cas');
+
+  try {
+    const users = h.client.collection('users');
+    await users.ensureTable();
+    await h.sync.start();
+
+    const upstream = h.mongo.db(h.dbName).collection('users');
+
+    await users.insertOne({ _id: 'u1', name: 'Alice', age: 30 } as never);
+    await h.sync.waitForDrain();
+    expect(await upstream.findOne({ _id: 'u1' })).toMatchObject({ name: 'Alice', _v: 1 });
+
+    // Another writer gets there first, using the same protocol.
+    await upstream.updateOne(
+      { _id: 'u1' },
+      { $set: { name: 'Edited elsewhere' }, $inc: { _v: 1 } }
+    );
+
+    // Our local edit still believes it is replacing _v: 1.
+    const conflicts: unknown[] = [];
+    h.sync.on('conflict', (event) => conflicts.push(event));
+    await users.updateOne({ _id: 'u1' }, { $set: { age: 31 } });
+    await h.sync.waitForDrain();
+
+    const after = await upstream.findOne({ _id: 'u1' });
+    expect(after).toMatchObject({ name: 'Edited elsewhere', _v: 2 });
+    expect(conflicts).toHaveLength(1);
+
+    // The local copy adopts the winner.
+    expect(await users.findOne({ _id: 'u1' })).toMatchObject({ name: 'Edited elsewhere' });
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('Sync parity - a server-side Date survives an unrelated local edit', async () => {
+  const h = await createHarness('bsontypes');
+
+  try {
+    const users = h.client.collection('users');
+    await users.ensureTable();
+    await h.sync.start();
+
+    const upstream = h.mongo.db(h.dbName).collection('users');
+
+    await users.insertOne({ _id: 'u1', name: 'Alice' } as never);
+    await h.sync.waitForDrain();
+
+    // A real BSON Date the local store cannot represent as anything but a string.
+    const createdAt = new Date('2024-01-01T00:00:00.000Z');
+    await upstream.updateOne({ _id: 'u1' }, { $set: { createdAt }, $inc: { _v: 1 } });
+
+    // Pull it into the shadow the way a conflict would, then edit a different field.
+    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Alice II' } });
+    await h.sync.waitForDrain();
+    await h.sync.waitForDrain();
+
+    const after = await upstream.findOne({ _id: 'u1' });
+    expect(after?.name).toBe('Alice II');
+    // The field we never touched is still a Date, not the ISO string a
+    // whole-document push would have left behind.
+    expect(after?.createdAt).toBeInstanceOf(Date);
+    expect((after?.createdAt as Date).toISOString()).toBe('2024-01-01T00:00:00.000Z');
+  } finally {
+    await h.dispose();
+  }
+});
+
 test('Sync parity - replication resumes after the replicator is restarted', async () => {
   const h = await createHarness('restart');
 
