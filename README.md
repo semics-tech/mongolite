@@ -71,6 +71,18 @@ async function main() {
 main();
 ```
 
+## Explore a database from the terminal
+
+```bash
+npx mongolite
+```
+
+Picks up the SQLite files around you, lists the collections it finds inside,
+and builds queries out of plain-English choices — "age is at least 30",
+"skills contains SQL" — using fields inferred from your actual documents. It
+prints the MongoDB filter it built alongside the results, and raw filters and
+raw SQL are a menu item away when you want them. See [the CLI docs](./docs/CLI.md).
+
 ## How does it compare?
 
 |                                                          | MongoLite   | lowdb                    | better-sqlite3 (raw) | NeDB                 | PouchDB                  | MongoDB |
@@ -86,15 +98,16 @@ MongoLite's niche: the MongoDB query API you already know, running anywhere SQLi
 
 ## Documentation
 
-| Topic                                              | Description                                                         |
-| -------------------------------------------------- | ------------------------------------------------------------------- |
-| [API Reference](./docs/API.md)                     | Full API docs: methods, query operators, update operators           |
-| [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                 |
-| [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API |
-| [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                     |
-| [Query Debugger](./docs/DEBUGGER.md)               | Interactive CLI for debugging queries and inspecting SQL            |
-| [Benchmarks](./docs/BENCHMARKS.md)                 | Performance benchmarks and storage characteristics                  |
-| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object                  |
+| Topic                                              | Description                                                            |
+| -------------------------------------------------- | ---------------------------------------------------------------------- |
+| [API Reference](./docs/API.md)                     | Full API docs: methods, query operators, update operators              |
+| [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                    |
+| [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API    |
+| [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                        |
+| [CLI](./docs/CLI.md)                               | `npx mongolite` — guided explorer for browsing and querying a database |
+| [Query Debugger](./docs/DEBUGGER.md)               | The older command-driven REPL (`npx mongolite --repl`)                 |
+| [Benchmarks](./docs/BENCHMARKS.md)                 | Performance benchmarks and storage characteristics                     |
+| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object                     |
 
 ## Backend Examples
 
