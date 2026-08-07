@@ -1519,7 +1519,16 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       if (!upsert) {
         return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: null };
       }
-      const result = await this.insertOne(replacement as Omit<T, '_id'> & { _id?: string });
+      // An upsert adopts the `_id` the filter pinned down, matching MongoDB. Without
+      // this the inserted document gets a freshly generated id and the caller's
+      // `replaceOne({ _id }, ..., { upsert: true })` silently creates the wrong row.
+      const filterId = (filter as { _id?: unknown })._id;
+      const seeded =
+        typeof filterId === 'string'
+          ? ({ ...replacement, _id: filterId } as Omit<T, '_id'> & { _id?: string })
+          : (replacement as Omit<T, '_id'> & { _id?: string });
+
+      const result = await this.insertOne(seeded);
       return {
         acknowledged: true,
         matchedCount: 0,
