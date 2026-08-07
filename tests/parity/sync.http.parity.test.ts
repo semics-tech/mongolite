@@ -194,8 +194,13 @@ test('HTTP parity - a concurrent server edit is not overwritten', async () => {
     });
     expect(conflicts).toHaveLength(1);
 
-    // The read-back that refreshes the shadow also went over HTTP.
-    expect(h.requests.some((url) => url.endsWith('/_sync/fetch'))).toBe(true);
+    // The receiver re-reads while classifying and returns the winning document inline,
+    // so reconciliation costs no extra round trip — `_sync/fetch` is only a fallback
+    // for conflicts that arrive without one.
+    expect(h.requests.filter((url) => url.endsWith('/_sync/fetch'))).toHaveLength(0);
+
+    // The local copy still adopts the winner, which is what proves the server document
+    // made it back across the wire.
     expect(await users.findOne({ _id: 'u1' })).toMatchObject({ name: 'Edited elsewhere' });
   } finally {
     await sync.stop();
