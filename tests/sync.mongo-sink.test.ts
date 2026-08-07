@@ -186,6 +186,49 @@ test('MongoSink - a conditional write that matches nothing is reported as a conf
   ]);
 });
 
+test('MongoSink - a conflict is caught even when the other writer bumped _v by exactly one', async () => {
+  const fake = createFakeDriver({
+    result: { matchedCount: 0 },
+    // Another client following the same protocol incremented `_v` by one, exactly as
+    // our own successful write would have. Only the document contents distinguish
+    // "we landed" from "they landed", and getting that wrong silently drops the
+    // conflict this whole mechanism exists to catch.
+    upstream: { u1: { _id: 'u1', name: 'Edited elsewhere', age: 30, _v: 2 } },
+  });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    driver: fake.driver,
+  });
+
+  const result = await sink.apply([
+    { ...upsert('u1', { age: 31 }), baseVersion: 1, diff: { set: { age: 31 }, unset: [] } },
+  ]);
+
+  expect(result.conflicts).toHaveLength(1);
+  expect(result.conflicts?.[0]).toMatchObject({ reason: 'version-mismatch', serverVersion: 2 });
+  expect(result.applied).toBe(0);
+});
+
+test('MongoSink - a write that did land is not reported as a conflict', async () => {
+  const fake = createFakeDriver({
+    // One op in the batch missed, so the aggregate count is short — but this document
+    // is at the expected version *and* carries our change, so it landed.
+    result: { matchedCount: 0 },
+    upstream: { u1: { _id: 'u1', name: 'Alice', age: 31, _v: 2 } },
+  });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    driver: fake.driver,
+  });
+
+  const result = await sink.apply([
+    { ...upsert('u1', { age: 31 }), baseVersion: 1, diff: { set: { age: 31 }, unset: [] } },
+  ]);
+
+  expect(result.conflicts).toBeUndefined();
+  expect(result.applied).toBe(1);
+});
+
 test('MongoSink - versioning off restores unconditional whole-document replacement', async () => {
   const fake = createFakeDriver();
   const sink = new MongoUpstreamSink({

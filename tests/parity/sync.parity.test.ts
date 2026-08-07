@@ -289,18 +289,24 @@ test('Sync parity - a server-side Date survives an unrelated local edit', async 
     await h.sync.waitForDrain();
 
     // A real BSON Date the local store cannot represent as anything but a string.
+    // A real BSON Date appears upstream, added by another writer.
     const createdAt = new Date('2024-01-01T00:00:00.000Z');
     await upstream.updateOne({ _id: 'u1' }, { $set: { createdAt }, $inc: { _v: 1 } });
 
-    // Pull it into the shadow the way a conflict would, then edit a different field.
-    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Alice II' } });
+    // The client does not know about it yet, so this edit loses and is rebased: the
+    // server's version is adopted locally and the shadow refreshed.
+    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Discarded' } });
     await h.sync.waitForDrain();
+    expect(await upstream.findOne({ _id: 'u1' })).toMatchObject({ name: 'Alice', _v: 2 });
+
+    // Now the client is up to date, so this edit lands.
+    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Alice II' } });
     await h.sync.waitForDrain();
 
     const after = await upstream.findOne({ _id: 'u1' });
     expect(after?.name).toBe('Alice II');
-    // The field we never touched is still a Date, not the ISO string a
-    // whole-document push would have left behind.
+    // The field we never touched is still a Date, not the ISO string a whole-document
+    // push would have left behind.
     expect(after?.createdAt).toBeInstanceOf(Date);
     expect((after?.createdAt as Date).toISOString()).toBe('2024-01-01T00:00:00.000Z');
   } finally {

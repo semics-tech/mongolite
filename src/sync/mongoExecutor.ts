@@ -7,7 +7,14 @@
  * comparing what the batch expected to change against what the server says changed, and
  * then re-reading the candidates to find out which document actually lost.
  */
-import { isConditional, readVersion, toUpstreamId } from './commands.js';
+import {
+  isConditional,
+  isReservedPath,
+  readVersion,
+  stripReservedFields,
+  toUpstreamId,
+} from './commands.js';
+import { deepEqual } from './diff.js';
 import type { MongoWriteCommand, ObjectIdFactory } from './commands.js';
 import type {
   MongoBulkWriteResultLike,
@@ -116,13 +123,17 @@ export async function executeWrites(
     }
 
     const landed = entries.length - rejected;
-    const missed = findMisses(entries, result, rejected, versioning);
+    const suspects = findMisses(entries, result, rejected, versioning);
 
-    if (missed.length > 0) {
-      await describeConflicts(db, collectionName, missed, conflicts, idMapping, ObjectId);
-    }
+    // `suspects` are candidates to investigate, not confirmed misses: the counts are
+    // aggregate, so one short count implicates every conditional write in the batch.
+    // Only the re-read says which of them actually lost, and `applied` must be reduced
+    // by that number rather than by the number investigated.
+    const confirmed = suspects.length
+      ? await describeConflicts(db, collectionName, suspects, conflicts, idMapping, ObjectId)
+      : 0;
 
-    applied += landed - missed.length;
+    applied += landed - confirmed;
   }
 
   return {
@@ -172,6 +183,8 @@ function findMisses(
  *
  * The re-read turns an aggregate "something didn't match" into a precise, per-document
  * answer, and supplies the current server document the caller needs to reconcile.
+ *
+ * @returns How many candidates genuinely lost.
  */
 async function describeConflicts(
   db: MongoDbLike,
@@ -180,7 +193,7 @@ async function describeConflicts(
   conflicts: SyncApplyConflict[],
   idMapping?: SyncIdMapping,
   ObjectId?: ObjectIdFactory
-): Promise<void> {
+): Promise<number> {
   const ids = candidates.map((entry) => toUpstreamId(entry.op.documentId, idMapping, ObjectId));
   const current = await db
     .collection(collectionName)
@@ -188,6 +201,7 @@ async function describeConflicts(
     .toArray();
 
   const byId = new Map(current.map((doc) => [String(doc._id), doc]));
+  let confirmed = 0;
 
   for (const { index, op } of candidates) {
     const serverDocument = byId.get(op.documentId);
@@ -197,20 +211,37 @@ async function describeConflicts(
       // Already gone upstream is the outcome we wanted, however it happened.
       if (!serverDocument) continue;
       conflicts.push({ index, reason: 'version-mismatch', serverDocument, serverVersion });
+      confirmed += 1;
       continue;
     }
 
     if (!serverDocument) {
       conflicts.push({ index, reason: 'missing' });
+      confirmed += 1;
       continue;
     }
 
-    // The write did land after all — another operation in the batch was the one that
-    // missed, and this document is already at the version we wrote.
-    if (isConditional(op) && serverVersion === (op.baseVersion as number) + 1) continue;
+    // The write may have landed after all, with a different operation in the batch
+    // being the one that missed.
+    //
+    // A version one ahead is necessary evidence but nowhere near sufficient: another
+    // writer following the same protocol also bumps `_v` by exactly one, so the two
+    // cases look identical from the version alone. Confirming that the document
+    // actually carries our change is what tells them apart — and getting this wrong
+    // silently swallows the very conflicts this machinery exists to catch.
+    if (
+      isConditional(op) &&
+      serverVersion === (op.baseVersion as number) + 1 &&
+      reflectsWrite(serverDocument, op)
+    ) {
+      continue;
+    }
 
     conflicts.push({ index, reason: 'version-mismatch', serverDocument, serverVersion });
+    confirmed += 1;
   }
+
+  return confirmed;
 }
 
 /**
@@ -283,6 +314,68 @@ export function classifyBulkError(
 
   // No per-write detail: a connection, timeout or auth error. Retry it.
   return null;
+}
+
+/**
+ * True when the upstream document carries the change this operation was making.
+ *
+ * Only the paths the operation itself wrote are checked. That is deliberate: those are
+ * the values we would have written in local JSON form, so comparing them against the
+ * server is meaningful, whereas fields we never touched may hold BSON types the local
+ * store cannot represent and would not compare equal.
+ *
+ * A false positive is possible if another writer happened to set the identical value —
+ * and is harmless, since the upstream then holds what we wanted anyway.
+ */
+function reflectsWrite(serverDocument: Record<string, unknown>, op: SyncOperation): boolean {
+  if (op.diff) {
+    for (const [path, value] of Object.entries(op.diff.set)) {
+      if (isReservedPath(path)) continue;
+      if (!valueAtPathEquals(serverDocument, path, value)) return false;
+    }
+    for (const path of op.diff.unset) {
+      if (isReservedPath(path)) continue;
+      if (readPath(serverDocument, path) !== undefined) return false;
+    }
+    return true;
+  }
+
+  // Whole-document write: every field we sent should be present upstream.
+  for (const [key, value] of Object.entries(stripReservedFields(op.document ?? {}))) {
+    if (!valueAtPathEquals(serverDocument, key, value)) return false;
+  }
+  return true;
+}
+
+/**
+ * Compares a value at a dotted path against what we wrote.
+ *
+ * The server side is flattened to local JSON shape first, so a `Date` upstream compares
+ * equal to the ISO string a local write would have carried.
+ */
+function valueAtPathEquals(
+  document: Record<string, unknown>,
+  path: string,
+  expected: unknown
+): boolean {
+  const actual = readPath(document, path);
+  if (actual === undefined) return false;
+  try {
+    return deepEqual(JSON.parse(JSON.stringify(actual)), expected);
+  } catch {
+    return false;
+  }
+}
+
+/** Reads a dotted path, returning `undefined` if any segment is missing. */
+function readPath(document: Record<string, unknown>, path: string): unknown {
+  let current: unknown = document;
+  for (const segment of path.split('.')) {
+    if (typeof current !== 'object' || current === null) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+    if (current === undefined) return undefined;
+  }
+  return current;
 }
 
 /**

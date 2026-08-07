@@ -221,11 +221,17 @@ test('HTTP parity - a server-side Date survives an unrelated local edit', async 
     await users.insertOne({ _id: 'u1', name: 'Alice' } as never);
     await sync.waitForDrain();
 
+    // A real BSON Date appears upstream, added by another writer.
     const createdAt = new Date('2024-01-01T00:00:00.000Z');
     await upstream.updateOne({ _id: 'u1' }, { $set: { createdAt }, $inc: { _v: 1 } });
 
-    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Alice II' } });
+    // This edit loses and is rebased — the conflict round trip happens over HTTP.
+    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Discarded' } });
     await sync.waitForDrain();
+    expect(await upstream.findOne({ _id: 'u1' })).toMatchObject({ name: 'Alice', _v: 2 });
+
+    // Now up to date, so this one lands.
+    await users.updateOne({ _id: 'u1' }, { $set: { name: 'Alice II' } });
     await sync.waitForDrain();
 
     const after = await upstream.findOne({ _id: 'u1' });
