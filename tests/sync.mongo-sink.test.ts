@@ -379,9 +379,9 @@ test('MongoSink - an unrecognised write error is retried rather than discarded',
   const fake = createFakeDriver({
     failWith: Object.assign(new Error('bulk write failed'), {
       name: 'MongoBulkWriteError',
-      // 11000 (duplicate key) can be transient during a failover, so it is not
-      // on the permanent list — the safe default is to retry the batch.
-      writeErrors: [{ index: 0, code: 11000, errmsg: 'E11000 duplicate key error' }],
+      // An unfamiliar code might be transient, so the safe default is to retry the
+      // whole batch rather than assume the write can never succeed.
+      writeErrors: [{ index: 0, code: 24601, errmsg: 'something novel went wrong' }],
     }),
   });
   const sink = new MongoUpstreamSink({
@@ -390,6 +390,58 @@ test('MongoSink - an unrecognised write error is retried rather than discarded',
   });
 
   await expect(sink.apply([upsert('u1', { name: 'Alice' })])).rejects.toThrow('bulk write failed');
+});
+
+test('MongoSink - a duplicate _id on create is a conflict, not a failure', async () => {
+  const fake = createFakeDriver({
+    failWith: Object.assign(new Error('bulk write failed'), {
+      name: 'MongoBulkWriteError',
+      writeErrors: [
+        {
+          index: 0,
+          code: 11000,
+          errmsg: 'E11000 duplicate key error collection: app.users index: _id_',
+          keyPattern: { _id: 1 },
+        },
+      ],
+    }),
+  });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    driver: fake.driver,
+  });
+
+  // Two clients raced to create the same document; the loser reconciles rather than
+  // dead-lettering a document that is perfectly valid.
+  const result = await sink.apply([upsert('u1', { name: 'Alice' })]);
+  expect(result.conflicts).toEqual([{ index: 0, reason: 'already-exists' }]);
+  expect(result.failures).toBeUndefined();
+});
+
+test('MongoSink - a duplicate on another unique index is a real failure', async () => {
+  const fake = createFakeDriver({
+    failWith: Object.assign(new Error('bulk write failed'), {
+      name: 'MongoBulkWriteError',
+      writeErrors: [
+        {
+          index: 0,
+          code: 11000,
+          errmsg: 'E11000 duplicate key error collection: app.users index: email_1',
+          keyPattern: { email: 1 },
+        },
+      ],
+    }),
+  });
+  const sink = new MongoUpstreamSink({
+    connectionString: 'mongodb://localhost:27017',
+    driver: fake.driver,
+  });
+
+  // Not a create race — the document genuinely violates a constraint, and retrying it
+  // as a phantom conflict would loop forever.
+  const result = await sink.apply([upsert('u1', { name: 'Alice' })]);
+  expect(result.failures?.[0]).toMatchObject({ index: 0, code: 11000 });
+  expect(result.conflicts).toBeUndefined();
 });
 
 test('MongoSink - a retryable-write error is always retried', async () => {

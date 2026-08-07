@@ -17,14 +17,18 @@ export { BrowserSqliteAdapter } from './adapters/browser.js';
 export type { SqlJsDatabase, SqlJsStatement } from './adapters/browser.js';
 export { NodeSqliteAdapter } from './adapters/node-sqlite.js';
 
-import { MongoUpstreamSink, SyncReplicator } from './sync/index.js';
-import type { MongoSinkOptions, SyncOptions } from './sync/index.js';
+import { HttpUpstreamSink, MongoUpstreamSink, SyncReplicator } from './sync/index.js';
+import type { HttpSinkOptions, MongoSinkOptions, SyncOptions } from './sync/index.js';
 
 export {
   SyncReplicator,
   SyncOutbox,
   SyncShadow,
   MongoUpstreamSink,
+  HttpUpstreamSink,
+  SyncRequestRejected,
+  SYNC_PROTOCOL_VERSION,
+  buildWriteCommand,
   computeDiff,
   applyDiff,
   isEmptyDiff,
@@ -32,8 +36,11 @@ export {
 } from './sync/index.js';
 export type {
   DocumentDiff,
+  FetchLike,
+  HttpSinkOptions,
   MongoSinkOptions,
   MongoUpstreamAuth,
+  WireOperation,
   ShadowEntry,
   SyncApplyConflict,
   SyncApplyFailure,
@@ -61,6 +68,13 @@ export interface MongoLiteClientOptions extends DBMongoLiteOptions {}
  * upstream connection details.
  */
 export interface MongoSyncOptions extends SyncOptions, Omit<MongoSinkOptions, 'idMapping'> {}
+
+/**
+ * Options for {@link MongoLite.syncToHttp} — replication settings plus the remote API's
+ * address and authentication.
+ */
+export interface HttpSyncOptions
+  extends SyncOptions, Omit<HttpSinkOptions, 'idMapping' | 'versioning' | 'replicator'> {}
 
 /**
  * MongoLite class is the main entry point for interacting with the SQLite-backed database.
@@ -170,6 +184,60 @@ export class MongoLite extends MongoLiteBase {
       // The sink builds the conditional writes, so it needs the same answer the
       // replicator uses when deciding whether to track shadows at all.
       versioning: syncOptions.versioning,
+    });
+
+    return this.createSync(sink, syncOptions);
+  }
+
+  /**
+   * Replicates changes to a remote HTTP API, which applies them to MongoDB on this
+   * client's behalf. For deployments where the local instance cannot reach the database
+   * directly.
+   *
+   * The wire format carries MongoDB-shaped commands along with the version predicates,
+   * so replication behaves the same as over a direct connection — the upstream stays the
+   * source of truth and concurrent writers are still detected. Mount
+   * `@semics-tech/mongolite/server` on the API to receive the messages.
+   *
+   * @example
+   * ```typescript
+   * const sync = client.syncToHttp({
+   *   baseUrl: 'https://api.example.com',
+   *   database: 'app',
+   *   headers: { 'luna-environment': 'prod' },
+   *   getAuthHeaders: async () => ({ Authorization: `Bearer ${await getAccessToken()}` }),
+   * });
+   *
+   * await sync.start();
+   * ```
+   */
+  syncToHttp(options: HttpSyncOptions): SyncReplicator {
+    const {
+      baseUrl,
+      database,
+      pathPrefix,
+      getAuthHeaders,
+      headers,
+      cookies,
+      fetch: fetchImpl,
+      timeoutMs,
+      includeCommands,
+      ...syncOptions
+    } = options;
+
+    const sink = new HttpUpstreamSink({
+      baseUrl,
+      database,
+      pathPrefix,
+      getAuthHeaders,
+      headers,
+      cookies,
+      fetch: fetchImpl,
+      timeoutMs,
+      includeCommands,
+      idMapping: syncOptions.idMapping,
+      versioning: syncOptions.versioning,
+      replicator: syncOptions.name,
     });
 
     return this.createSync(sink, syncOptions);

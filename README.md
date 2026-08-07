@@ -25,6 +25,7 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 - **Indexing** — create, list, and drop indexes including unique and compound indexes
 - **Change streams** — real-time change tracking via `collection.watch()`
 - **MongoDB sync** — replicate local writes upstream, surviving restarts and offline periods
+- **HTTP sync** — post the same changes to a remote API when MongoDB is unreachable
 - **JSON safety** — validates documents before insert, and a corrupted row can't break queries for the rest of the collection
 - **TypeScript** — fully typed with strict mode
 
@@ -72,28 +73,28 @@ main();
 
 ## How does it compare?
 
-| | MongoLite | lowdb | better-sqlite3 (raw) | NeDB | PouchDB | MongoDB |
-|---|---|---|---|---|---|---|
-| MongoDB query API (`$set`, `$elemMatch`, aggregation...) | ✅ | ❌ (plain object access) | ❌ (raw SQL) | ✅ | ❌ (Mango/CouchDB-style) | ✅ |
-| Runs in the browser | ✅ (sql.js) | ✅ | ❌ (native binding) | ✅ | ✅ (IndexedDB) | ❌ |
-| Runs on the edge (Cloudflare Durable Objects) | ✅ | ❌ | ❌ (native binding) | ❌ | ❌ | ❌ |
-| Zero infrastructure (no server process) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| TypeScript, strict mode | ✅ | ✅ | ✅ | ⚠️ (community types) | ⚠️ (community types) | ✅ |
-| Actively maintained | ✅ | ✅ | ✅ | ❌ (unmaintained) | ⚠️ (slow-moving) | ✅ |
+|                                                          | MongoLite   | lowdb                    | better-sqlite3 (raw) | NeDB                 | PouchDB                  | MongoDB |
+| -------------------------------------------------------- | ----------- | ------------------------ | -------------------- | -------------------- | ------------------------ | ------- |
+| MongoDB query API (`$set`, `$elemMatch`, aggregation...) | ✅          | ❌ (plain object access) | ❌ (raw SQL)         | ✅                   | ❌ (Mango/CouchDB-style) | ✅      |
+| Runs in the browser                                      | ✅ (sql.js) | ✅                       | ❌ (native binding)  | ✅                   | ✅ (IndexedDB)           | ❌      |
+| Runs on the edge (Cloudflare Durable Objects)            | ✅          | ❌                       | ❌ (native binding)  | ❌                   | ❌                       | ❌      |
+| Zero infrastructure (no server process)                  | ✅          | ✅                       | ✅                   | ✅                   | ✅                       | ❌      |
+| TypeScript, strict mode                                  | ✅          | ✅                       | ✅                   | ⚠️ (community types) | ⚠️ (community types)     | ✅      |
+| Actively maintained                                      | ✅          | ✅                       | ✅                   | ❌ (unmaintained)    | ⚠️ (slow-moving)         | ✅      |
 
 MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
 
 ## Documentation
 
-| Topic | Description |
-|-------|-------------|
-| [API Reference](./docs/API.md) | Full API docs: methods, query operators, update operators |
-| [Change Streams](./docs/CHANGE_STREAMS.md) | Real-time change tracking with `collection.watch()` |
-| [Syncing to MongoDB](./docs/SYNC.md) | One-way replication from a local database to an upstream MongoDB |
-| [JSON Safety](./docs/JSON_SAFETY.md) | Document validation and corrupted data recovery |
-| [Query Debugger](./docs/DEBUGGER.md) | Interactive CLI for debugging queries and inspecting SQL |
-| [Benchmarks](./docs/BENCHMARKS.md) | Performance benchmarks and storage characteristics |
-| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object |
+| Topic                                              | Description                                                         |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| [API Reference](./docs/API.md)                     | Full API docs: methods, query operators, update operators           |
+| [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                 |
+| [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API |
+| [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                     |
+| [Query Debugger](./docs/DEBUGGER.md)               | Interactive CLI for debugging queries and inspecting SQL            |
+| [Benchmarks](./docs/BENCHMARKS.md)                 | Performance benchmarks and storage characteristics                  |
+| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object                  |
 
 ## Backend Examples
 
@@ -114,9 +115,9 @@ await client.close();
 ```typescript
 const client = new MongoLite({
   filePath: './myapp.sqlite',
-  WAL: true,          // Write-Ahead Logging. Default: true
-  busyTimeout: 5000,  // ms to wait for a lock before SQLITE_BUSY. Default: 5000
-  shared: true,       // reuse one connection per file in this process. Default: false
+  WAL: true, // Write-Ahead Logging. Default: true
+  busyTimeout: 5000, // ms to wait for a lock before SQLITE_BUSY. Default: 5000
+  shared: true, // reuse one connection per file in this process. Default: false
   readOnly: false,
   verbose: false,
 });
@@ -138,7 +139,7 @@ await a.close(); // b keeps working — the handle is reference counted
 await b.close(); // last holder out actually closes it
 ```
 
-Connections are only shared when the resolved path *and* every setting that
+Connections are only shared when the resolved path _and_ every setting that
 changes the handle's behaviour match. `:memory:` databases are never shared,
 since two `:memory:` opens are two unrelated databases.
 
@@ -182,6 +183,7 @@ await client.close();
 ```
 
 <a id="native-nodesqlite-vs-better-sqlite3"></a>
+
 > **Which one should I use?** `node:sqlite` (the default) is still marked
 > experimental upstream but requires no native build step, which is why it's
 > the default here. `better-sqlite3` is the older, more battle-tested native
@@ -251,7 +253,7 @@ await client.connect();
 
 const sync = client.syncToMongo({
   connectionString: 'mongodb+srv://user:pass@cluster.example.com/app',
-  collections: ['users', 'orders'],   // Omit to replicate everything
+  collections: ['users', 'orders'], // Omit to replicate everything
 });
 
 await sync.start();
@@ -259,11 +261,11 @@ await sync.start();
 // Ordinary writes — replication happens in the background.
 await client.collection('users').insertOne({ name: 'Alice', age: 30 });
 
-await sync.stop({ flush: true });     // Push anything still queued on shutdown
+await sync.stop({ flush: true }); // Push anything still queued on shutdown
 ```
 
 Changes are captured by SQLite triggers into a durable outbox **inside the same
-transaction as the write itself**, so a change is either committed locally *and*
+transaction as the write itself**, so a change is either committed locally _and_
 queued for replication, or neither. A background worker coalesces the queue, applies
 it upstream, and only then advances a persisted checkpoint — so an outage parks the
 backlog rather than losing it, and a restart resumes exactly where it stopped.
@@ -272,9 +274,24 @@ Upstream is treated as the source of truth. Each push is a conditional write aga
 the version it last saw, and carries only the fields that actually changed, so a
 concurrent edit by another writer is detected rather than silently overwritten.
 
-> See [docs/SYNC.md](./docs/SYNC.md) for the full guide: advanced authentication
-> (X.509, mTLS, AWS IAM), filtering and reshaping documents, dead-letter
-> handling, multiple upstreams, and custom sinks.
+Where the local instance cannot reach MongoDB directly, `syncToHttp` posts the same
+operations to a remote API instead, and `@semics-tech/mongolite/server` applies them on
+the far side:
+
+```typescript
+const sync = client.syncToHttp({
+  baseUrl: 'https://api.example.com',
+  database: 'app',
+  getAuthHeaders: async () => ({ Authorization: `Bearer ${await getAccessToken()}` }),
+});
+```
+
+The version predicates travel with each operation and conflicts come back in the
+response, so the HTTP hop is pure transport — replication behaves the same either way.
+
+> See [docs/SYNC.md](./docs/SYNC.md) for the full guide: syncing through an HTTP API,
+> advanced authentication (X.509, mTLS, AWS IAM, Azure managed identity), filtering and
+> reshaping documents, dead-letter handling, multiple upstreams, and custom sinks.
 
 ## Development
 

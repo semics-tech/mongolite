@@ -56,6 +56,18 @@ await sync.stop({ flush: true });
 See [Syncing to MongoDB](./SYNC.md) for the full option list, authentication,
 resilience behaviour and monitoring.
 
+### `syncToHttp(options: HttpSyncOptions): SyncReplicator`
+
+Replicates to a remote HTTP API, which applies the changes to MongoDB on this client's
+behalf. For deployments that cannot reach the database directly.
+
+- `options.baseUrl` / `options.database`: Where to post (required).
+- `options.getAuthHeaders`: Resolved before every request, so short-lived tokens refresh.
+- `options.fetch`: Supply your own `fetch` (e.g. `ofetch`); defaults to the global one.
+
+Mount `createSyncReceiver` from `@semics-tech/mongolite/server` on the API to receive
+the messages. See [Syncing to MongoDB](./SYNC.md#syncing-through-an-http-api).
+
 ### `createSync(sink: SyncSink, options?: SyncOptions): SyncReplicator`
 
 The backend-agnostic form of the above. Pass any `SyncSink` implementation to
@@ -227,60 +239,60 @@ Drops all indexes except the one on `_id`.
 
 ### Comparison
 
-| Operator | Description |
-|----------|-------------|
-| `{ field: value }` or `{ field: { $eq: value } }` | Equals |
-| `{ field: { $ne: value } }` | Not equals |
-| `{ field: { $gt: value } }` | Greater than |
-| `{ field: { $gte: value } }` | Greater than or equal |
-| `{ field: { $lt: value } }` | Less than |
-| `{ field: { $lte: value } }` | Less than or equal |
-| `{ field: { $in: [v1, v2] } }` | In array |
-| `{ field: { $nin: [v1, v2] } }` | Not in array |
-| `{ field: { $regex: pattern } }` | Matches regular expression |
-| `{ field: { $size: n } }` | Array has N elements |
-| `{ field: { $type: typeName } }` | Field is of given type |
-| `{ field: { $mod: [divisor, remainder] } }` | Modulo |
+| Operator                                          | Description                |
+| ------------------------------------------------- | -------------------------- |
+| `{ field: value }` or `{ field: { $eq: value } }` | Equals                     |
+| `{ field: { $ne: value } }`                       | Not equals                 |
+| `{ field: { $gt: value } }`                       | Greater than               |
+| `{ field: { $gte: value } }`                      | Greater than or equal      |
+| `{ field: { $lt: value } }`                       | Less than                  |
+| `{ field: { $lte: value } }`                      | Less than or equal         |
+| `{ field: { $in: [v1, v2] } }`                    | In array                   |
+| `{ field: { $nin: [v1, v2] } }`                   | Not in array               |
+| `{ field: { $regex: pattern } }`                  | Matches regular expression |
+| `{ field: { $size: n } }`                         | Array has N elements       |
+| `{ field: { $type: typeName } }`                  | Field is of given type     |
+| `{ field: { $mod: [divisor, remainder] } }`       | Modulo                     |
 
 ### Logical
 
-| Operator | Description |
-|----------|-------------|
-| `{ $and: [f1, f2] }` | Logical AND |
-| `{ $or: [f1, f2] }` | Logical OR |
-| `{ $nor: [f1, f2] }` | Logical NOR |
+| Operator                    | Description                          |
+| --------------------------- | ------------------------------------ |
+| `{ $and: [f1, f2] }`        | Logical AND                          |
+| `{ $or: [f1, f2] }`         | Logical OR                           |
+| `{ $nor: [f1, f2] }`        | Logical NOR                          |
 | `{ field: { $not: expr } }` | Negates a single operator expression |
 
 ### Element
 
-| Operator | Description |
-|----------|-------------|
+| Operator                          | Description           |
+| --------------------------------- | --------------------- |
 | `{ field: { $exists: boolean } }` | Field exists (or not) |
 
 ### Array
 
-| Operator | Description |
-|----------|-------------|
-| `{ field: { $all: [v1, v2] } }` | Array contains all values |
+| Operator                           | Description                            |
+| ---------------------------------- | -------------------------------------- |
+| `{ field: { $all: [v1, v2] } }`    | Array contains all values              |
 | `{ field: { $elemMatch: query } }` | At least one element matches the query |
 
 ---
 
 ## Update Operators
 
-| Operator | Description |
-|----------|-------------|
-| `$set` | Sets field values |
-| `$unset` | Removes fields |
-| `$inc` | Increments numeric fields |
-| `$mul` | Multiplies numeric fields |
-| `$min` | Sets field to minimum of current and given value |
-| `$max` | Sets field to maximum of current and given value |
-| `$push` | Appends a value to an array (supports `$each`) |
-| `$pull` | Removes matching values from an array |
-| `$addToSet` | Adds a value to an array only if it doesn't already exist |
-| `$pop` | Removes the first (`-1`) or last (`1`) element of an array |
-| `$currentDate` | Sets a field to the current date |
+| Operator       | Description                                                |
+| -------------- | ---------------------------------------------------------- |
+| `$set`         | Sets field values                                          |
+| `$unset`       | Removes fields                                             |
+| `$inc`         | Increments numeric fields                                  |
+| `$mul`         | Multiplies numeric fields                                  |
+| `$min`         | Sets field to minimum of current and given value           |
+| `$max`         | Sets field to maximum of current and given value           |
+| `$push`        | Appends a value to an array (supports `$each`)             |
+| `$pull`        | Removes matching values from an array                      |
+| `$addToSet`    | Adds a value to an array only if it doesn't already exist  |
+| `$pop`         | Removes the first (`-1`) or last (`1`) element of an array |
+| `$currentDate` | Sets a field to the current date                           |
 
 ### Examples
 

@@ -35,11 +35,7 @@ export type { MongoLiteBaseOptions } from './mongo-client.js';
 
 // Cloudflare-specific adapter
 export { CloudflareDurableObjectAdapter } from './adapters/cloudflare.js';
-export type {
-  SqlStorage,
-  SqlStorageCursor,
-  SqlStorageValue,
-} from './adapters/cloudflare.js';
+export type { SqlStorage, SqlStorageCursor, SqlStorageValue } from './adapters/cloudflare.js';
 
 // Shared types and interfaces
 export type { IDatabaseAdapter } from './db.js';

@@ -388,6 +388,149 @@ process.on('SIGTERM', async () => {
 });
 ```
 
+## Syncing through an HTTP API
+
+When the local instance cannot reach MongoDB directly, it can post its changes to a
+remote API that applies them on its behalf. Use `syncToHttp` on the client and mount the
+receiver on the API.
+
+```typescript
+// Client — no MongoDB connection, no `mongodb` dependency.
+const sync = client.syncToHttp({
+  baseUrl: 'https://api.example.com',
+  database: 'app',
+  headers: { 'luna-environment': 'prod' },
+  getAuthHeaders: async () => ({ Authorization: `Bearer ${await getAccessToken()}` }),
+});
+
+await sync.start();
+```
+
+```typescript
+// Remote API — install the same package and mount the receiver.
+import { MongoClient } from 'mongodb';
+import { createSyncReceiver } from '@semics-tech/mongolite/server';
+
+const mongo = await new MongoClient(process.env.MONGO_URL!).connect();
+const receiver = createSyncReceiver({
+  client: mongo,
+  database: 'app',
+  allowedCollections: ['users', 'orders'],
+});
+
+app.post('/sync/:db/_sync', async (req, res) => {
+  const result = await receiver.apply(req.body);
+  res.status(result.status).set(result.headers).send(result.body);
+});
+
+app.post('/sync/:db/_sync/fetch', async (req, res) => {
+  const result = await receiver.fetch(req.body);
+  res.status(result.status).set(result.headers).send(result.body);
+});
+```
+
+The `./server` entry point imports nothing SQLite-related, so it is safe on a server
+that has no local database of its own.
+
+### Everything behaves the same
+
+The version predicates travel with each operation and conflicts come back in the
+response, so the HTTP hop is pure transport. Concurrent-writer detection, field-level
+diffs, BSON-type preservation, retry, outage buffering and checkpointing all work
+exactly as they do over a direct connection.
+
+Bodies are **relaxed Extended JSON**, so `ObjectId`, `Date`, `Binary` and `Decimal128`
+survive the hop. (Canonical Extended JSON would encode every number as `$numberInt` /
+`$numberDouble` and revive it as a BSON wrapper, so a local `age: 31` would land upstream
+as an `Int32` over HTTP but as a double over a direct connection — the same change
+producing different stored types depending on transport.)
+
+### Request shape
+
+```jsonc
+POST /sync/app/_sync
+{
+  "protocol": 1,
+  "replicator": "default",
+  "operations": [
+    {
+      "collection": "users",
+      "documentId": "507f1f77bcf86cd799439011",
+      "type": "upsert",
+      "baseVersion": 7,
+      "diff": { "set": { "age": 31 }, "unset": ["nickname"] },
+      "command": {                                  // ready to forward to MongoDB
+        "updateOne": {
+          "filter": { "_id": { "$oid": "507f1f77bcf86cd799439011" }, "_v": 7 },
+          "update": { "$set": { "age": 31 }, "$unset": { "nickname": "" },
+                      "$inc": { "_v": 1 }, "$currentDate": { "_updatedAt": true } }
+        }
+      }
+    }
+  ]
+}
+```
+
+The response mirrors what a sink returns: `{ applied, failures?, conflicts? }`.
+
+### Securing the receiver
+
+The receiver accepts writes from whatever can reach it, so treat it as a privileged
+endpoint:
+
+- **Commands are rebuilt, not executed as sent.** By default the receiver ignores the
+  `command` field and rebuilds it from the operation's own fields. For a well-behaved
+  client the result is identical; for a hostile one it is the difference between a
+  scoped `updateOne` and whatever they felt like posting. `trustClientCommands: true`
+  opts into passthrough and should only be used on a fully trusted network.
+- **`allowedCollections`** — without it, a client can write to every collection in the
+  database, including ones sync was never meant to touch.
+- **`verifyRequest`** — your own authorisation check, on top of whatever the surrounding
+  API already enforces.
+- **`maxOperations`** — caps batch size. Defaults to 1000.
+
+Internal errors return a generic message; only protocol-level errors return detail,
+since the response goes back to the client.
+
+### Failure handling
+
+| Response                           | Treated as | Result                                                                         |
+| ---------------------------------- | ---------- | ------------------------------------------------------------------------------ |
+| `5xx`, `408`, `429`, network error | Transient  | Retried with backoff; the outbox holds the backlog                             |
+| Other `4xx`                        | Permanent  | Dead-lettered — a request the API refuses will be refused identically on retry |
+| `200` with `conflicts`             | Conflict   | Reconciled per {@link SyncOptions.onConflict}                                  |
+
+Retries are owned by the replicator, not the sink. If you pass a `fetch` implementation
+that retries internally (such as `ofetch` with `retry`), the two compound — set its retry
+count to zero.
+
+### Authentication
+
+`getAuthHeaders` is called before every request, so short-lived tokens can be refreshed:
+
+```typescript
+import { DefaultAzureCredential } from '@azure/identity';
+
+const credential = new DefaultAzureCredential();
+let cached: { token: string; expiresAt: number } | null = null;
+
+const sync = client.syncToHttp({
+  baseUrl: process.env.API_URL!,
+  database: 'app',
+  headers: { 'luna-managed-identity': process.env.LUNA_CLIENT! },
+  getAuthHeaders: async () => {
+    if (!cached || Date.now() >= cached.expiresAt) {
+      const { token } = await credential.getToken('https://graph.microsoft.com/.default');
+      cached = { token, expiresAt: Date.now() + 5 * 60_000 };
+    }
+    return { Authorization: `Bearer ${cached.token}` };
+  },
+});
+```
+
+`set-cookie` is captured and replayed on later requests, for APIs that use a session
+cookie for affinity. Pass `cookies: false` to disable.
+
 ## Other backends
 
 `syncToMongo` is a convenience over a backend-agnostic core. Implement `SyncSink`
@@ -426,6 +569,9 @@ Replication adds three tables, all excluded from `listCollections()`:
 | `__mongolite_sync_state__`      | Per-replicator checkpoint and backfill progress                            |
 | `__mongolite_sync_deadletter__` | Permanently rejected changes, kept for inspection                          |
 | `__mongolite_sync_shadow__`     | Last-known upstream state per document, for diffing and conflict detection |
+
+These are local to the client and never cross the wire; the HTTP transport carries
+operations, not bookkeeping.
 
 ## Limitations
 

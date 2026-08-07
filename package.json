@@ -21,6 +21,11 @@
       "types": "./dist/better-sqlite3.d.ts",
       "import": "./dist/better-sqlite3.js",
       "require": "./dist/cjs/better-sqlite3.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "require": "./dist/cjs/server.js"
     }
   },
   "bin": {
