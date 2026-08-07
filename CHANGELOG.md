@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/semics-tech/mongolite/compare/v1.2.0...v1.3.0) (2026-08-07)
+
+
+### Features
+
+* **cli:** guided explorer that needs no MongoDB syntax ([#84](https://github.com/semics-tech/mongolite/issues/84)) ([1a08b4d](https://github.com/semics-tech/mongolite/commit/1a08b4dffa16fd78ed8e6ea721ecd5a75be0f571))
+
 # [1.2.0](https://github.com/semics-tech/mongolite/compare/v1.1.0...v1.2.0) (2026-08-03)
 
 
