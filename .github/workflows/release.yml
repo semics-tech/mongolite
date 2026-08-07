@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - master
+  # Lets a maintainer re-fire the release from the Actions tab when a push
+  # to master never produced a run (e.g. a GitHub Actions outage swallowed
+  # the event) - there is otherwise no run to re-run in that situation.
+  workflow_dispatch: {}
 
 permissions:
   contents: write
