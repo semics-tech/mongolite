@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/semics-tech/mongolite/compare/v1.3.0...v1.4.0) (2026-08-07)
+
+
+### Features
+
+* replicate to MongoDB, directly or through a remote HTTP API ([#85](https://github.com/semics-tech/mongolite/issues/85)) ([2afe380](https://github.com/semics-tech/mongolite/commit/2afe380620fcde8d0445a07a6d864a251f010ca1))
+
 # [1.3.0](https://github.com/semics-tech/mongolite/compare/v1.2.0...v1.3.0) (2026-08-07)
 
 
