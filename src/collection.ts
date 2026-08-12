@@ -1276,15 +1276,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async countDocuments(filter: Filter<T> = {}): Promise<number> {
     await this.ensureTable();
 
-    const paramsForCount: unknown[] = [];
-    const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
-      filter,
-      paramsForCount
-    );
-    const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause}`;
-
-    const result = await this.db.get<{ count: number }>(countSql, paramsForCount);
-    return result?.count || 0;
+    return this.find(filter).count();
   }
 
   /**
