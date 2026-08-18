@@ -240,8 +240,23 @@ describe('Collection Indexing', async () => {
       tags: [],
     });
 
-    // Verify both documents exist
+    // A third document with a different age, so that the filtered count and
+    // the total collection count diverge — a regression test for count()
+    // ignoring its filter would pass with a stale assertion of 2 out of 2.
+    await usersCollection.insertOne({
+      name: 'Person 3',
+      email: 'person3@example.com',
+      age: 99,
+      address: { city: 'City 3', country: 'Country 3' },
+      tags: [],
+    });
+
+    // Verify both documents matching the filter are counted, not the whole collection
     const count = await usersCollection.find({ age: 30 }).count();
     expect(count).toBe(2);
+
+    // A filter matching nothing should count zero, not the whole collection
+    const zeroCount = await usersCollection.find({ age: 1000 }).count();
+    expect(zeroCount).toBe(0);
   });
 });
