@@ -12,6 +12,7 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 - You want a MongoDB-style API without running a MongoDB server
 - You need a lightweight, embedded database for local apps, CLIs, or testing
 - You want simple file-based persistence with zero infrastructure overhead
+- You want a persistent, high-performance local cache in front of a remote MongoDB, one that survives restarts and network interruptions, without giving up Mongo's query semantics (including things that are natural in a document model but awkward in SQL, like layered/override queries)
 
 ## Features
 
