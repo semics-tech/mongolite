@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/semics-tech/mongolite/compare/v1.4.0...v1.4.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* FindCursor.count() ignores its filter and returns the whole collection count ([572ad09](https://github.com/semics-tech/mongolite/commit/572ad09170f1ed2457a1d73f9a72d764ebc2fff6)), closes [#86](https://github.com/semics-tech/mongolite/issues/86)
+
 # [1.4.0](https://github.com/semics-tech/mongolite/compare/v1.3.0...v1.4.0) (2026-08-07)
 
 
