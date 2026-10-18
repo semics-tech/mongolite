@@ -155,10 +155,10 @@ export class FindCursor<T extends DocumentWithId> {
   constructor(
     private db: IDatabaseAdapter,
     private collectionName: string,
-    initialFilter: Filter<T>,
+    private readonly filter: Filter<T>,
     private readonly options: { verbose?: boolean } = {}
   ) {
-    this.queryParts = this.buildSelectQuery(initialFilter);
+    this.queryParts = this.buildSelectQuery(filter);
   }
 
   private parseJsonPath(path: string): string {
@@ -944,9 +944,10 @@ export class FindCursor<T extends DocumentWithId> {
    * @returns A promise that resolves to the count of matching documents.
    */
   public async count(): Promise<number> {
-    const whereClause = this.buildWhereClause({}, []);
+    const params: unknown[] = [];
+    const whereClause = this.buildGuardedWhereClause(this.filter, params);
     const countSql = `SELECT COUNT(*) as count FROM "${this.collectionName}" WHERE ${whereClause}`;
-    const result = await this.db.get<{ count: number }>(countSql);
+    const result = await this.db.get<{ count: number }>(countSql, params);
     return result?.count ?? 0; // Return 0 if result is undefined
   }
 }

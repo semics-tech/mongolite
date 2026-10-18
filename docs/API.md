@@ -192,6 +192,10 @@ Sorts results. Example: `{ age: -1, name: 1 }` (1 = ascending, -1 = descending).
 
 Specifies which fields to include or exclude in results.
 
+### `async count(): Promise<number>`
+
+Returns the number of documents matching the cursor's filter (like MongoDB's `cursor.count()`, it ignores `skip`/`limit` but never the filter).
+
 ---
 
 ## Indexing
