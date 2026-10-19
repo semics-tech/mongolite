@@ -16,7 +16,7 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 
 ## Features
 
-- **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate`, and more
+- **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate` (a subset of stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`), and more
 - **SQLite persistence** — single file, zero configuration, works offline
 - **Automatic `_id` generation** — UUID assigned on insert if not provided
 - **WAL mode** — Write-Ahead Logging for better concurrent read access, on by default
@@ -86,14 +86,16 @@ raw SQL are a menu item away when you want them. See [the CLI docs](./docs/CLI.m
 
 ## How does it compare?
 
-|                                                          | MongoLite   | lowdb                    | better-sqlite3 (raw) | NeDB                 | PouchDB                  | MongoDB |
-| -------------------------------------------------------- | ----------- | ------------------------ | -------------------- | -------------------- | ------------------------ | ------- |
-| MongoDB query API (`$set`, `$elemMatch`, aggregation...) | ✅          | ❌ (plain object access) | ❌ (raw SQL)         | ✅                   | ❌ (Mango/CouchDB-style) | ✅      |
-| Runs in the browser                                      | ✅ (sql.js) | ✅                       | ❌ (native binding)  | ✅                   | ✅ (IndexedDB)           | ❌      |
-| Runs on the edge (Cloudflare Durable Objects)            | ✅          | ❌                       | ❌ (native binding)  | ❌                   | ❌                       | ❌      |
-| Zero infrastructure (no server process)                  | ✅          | ✅                       | ✅                   | ✅                   | ✅                       | ❌      |
-| TypeScript, strict mode                                  | ✅          | ✅                       | ✅                   | ⚠️ (community types) | ⚠️ (community types)     | ✅      |
-| Actively maintained                                      | ✅          | ✅                       | ✅                   | ❌ (unmaintained)    | ⚠️ (slow-moving)         | ✅      |
+|                                                     | MongoLite   | lowdb                    | better-sqlite3 (raw) | NeDB                        | PouchDB                     | MongoDB |
+| --------------------------------------------------- | ----------- | ------------------------ | -------------------- | --------------------------- | --------------------------- | ------- |
+| MongoDB-style query API (`$set`, `$elemMatch`, ...) | ✅          | ❌ (plain object access) | ❌ (raw SQL)         | ✅ (no aggregation)         | ❌ (Mango/CouchDB-style)    | ✅      |
+| Runs in the browser                                 | ✅ (sql.js) | ✅                       | ❌ (native binding)  | ✅                          | ✅ (IndexedDB)              | ❌      |
+| Runs on the edge (Cloudflare Durable Objects)       | ✅          | ❌                       | ❌ (native binding)  | ❌                          | ❌                          | ❌      |
+| Zero infrastructure (no server process)             | ✅          | ✅                       | ✅                   | ✅                          | ✅                          | ❌      |
+| TypeScript, strict mode                             | ✅          | ✅                       | ✅                   | ⚠️ (community types)        | ⚠️ (community types)        | ✅      |
+| Actively maintained                                 | ✅          | ✅                       | ✅                   | ⚠️ (little recent activity) | ⚠️ (varies; check the repo) | ✅      |
+
+_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has no multi-document transaction API ([API reference](./docs/API.md#async-aggregatepipeline-promiseunknown))._
 
 MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
 
