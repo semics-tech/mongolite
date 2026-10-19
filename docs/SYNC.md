@@ -5,10 +5,12 @@ deployment. Point it at a connection string and the local database becomes a
 local-first write layer that converges upstream — including across process
 restarts, network outages and offline periods.
 
-Replication is **one-way**: local → upstream. Upstream changes are not streamed back
-down — but the upstream is still treated as authoritative. Every push is a conditional
-write against the version it last saw, so a concurrent edit by another writer is
-detected and wins rather than being silently overwritten.
+Replication is **one-way**: local → upstream. There is no change stream from upstream
+to the device, so edits made elsewhere do not arrive on their own. The one exception
+is conflict resolution: every push is a conditional write against the version it last
+saw, and when another writer got there first, the default resolution (`'server'`)
+detects it, keeps the upstream version and writes it into the local collection. See
+[Handling conflicts](#handling-conflicts).
 
 ```typescript
 import { MongoLite } from '@semics-tech/mongolite';
@@ -561,7 +563,7 @@ dead-lettered instead of blocking the stream.
 
 ## Internal tables
 
-Replication adds three tables, all excluded from `listCollections()`:
+Replication adds four tables, all excluded from `listCollections()`:
 
 | Table                           | Purpose                                                                    |
 | ------------------------------- | -------------------------------------------------------------------------- |
@@ -576,8 +578,8 @@ operations, not bookkeeping.
 ## Limitations
 
 - **One-way.** Upstream changes are not streamed back down. A document is pulled down
-  only when a push to it conflicts, so a local copy can be stale until something tries
-  to write to it.
+  only when a push to it conflicts (and `onConflict` resolves to `'server'`), so a
+  local copy can be stale until something tries to write to it.
 - **Cooperative versioning.** `_v` detects concurrent writers that use the same
   protocol. A foreign application writing directly without incrementing `_v` is not
   detected.
