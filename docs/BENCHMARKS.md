@@ -1,32 +1,48 @@
 # Performance Benchmarks
 
-*Last updated: 2025-07-27*
+*Last updated: 2026-10-19 (mongolite 1.4.1 + the `deleteOne` fix in this branch)*
+
+## Environment and method
+
+- **Hardware:** Apple M1 (arm64), 8 cores, 8 GB RAM, local SSD
+- **Software:** macOS (Darwin 25.6), Node.js v24.21.0, SQLite 3.53.4 via the built-in `node:sqlite` adapter (the default for a file path)
+- **Command:** `npm run benchmark` (`scripts/benchmark.ts`), single run, single process
+- **Dataset:** 10,000 documents (~450 bytes each: strings, numbers, a 3-element `tags` array, a nested `metadata` object), file-backed database
+- **Timing:** wall-clock via `performance.now()` around a sequential `await` loop. Every operation is its own auto-committed statement: no explicit transaction, no batching, no warm-up, no repeated runs, so expect a few percent of run-to-run noise.
+- **Indexes:** the `_INDEXED` rows run after `createIndex` on `age`, `metadata.version`, `active`, `score` and `tags`. `UPDATE` and `DELETE` run last, with those indexes present, but filter on `name`, which is **not** indexed, so each does a table scan.
+- **Caveat:** the old numbers (2025-07-27) came from a different machine and an older version, so they are not directly comparable.
 
 ## Operation Performance
 
 | Operation | Records Tested | Duration (ms) | Ops/Second | Avg Time/Op (ms) |
 |-----------|----------------|---------------|------------|------------------|
-| INSERT_INDIVIDUAL | 1,000 | 4704.68 | 213 | 4.705 |
-| INSERT_BATCH | 9,000 | 247.67 | 36339 | 0.028 |
-| QUERY_SIMPLE_NO_INDEX | 1,000 | 72.35 | 13821 | 0.072 |
-| QUERY_COMPLEX_NO_INDEX | 500 | 37.84 | 13214 | 0.076 |
-| QUERY_ARRAY_NO_INDEX | 500 | 29.82 | 16768 | 0.060 |
-| QUERY_FIND_MANY_NO_INDEX | 100 | 36.71 | 2724 | 0.367 |
-| QUERY_SIMPLE_INDEXED | 1,000 | 48.70 | 20533 | 0.049 |
-| QUERY_COMPLEX_INDEXED | 500 | 36.09 | 13854 | 0.072 |
-| QUERY_ARRAY_INDEXED | 500 | 28.26 | 17692 | 0.057 |
-| QUERY_FIND_MANY_INDEXED | 100 | 41.85 | 2390 | 0.418 |
-| UPDATE | 1,000 | 6093.94 | 164 | 6.094 |
-| DELETE | 1,000 | 17230.04 | 58 | 17.230 |
+| INSERT_INDIVIDUAL | 1,000 | 91.46 | 10933 | 0.091 |
+| INSERT_BATCH | 9,000 | 110.44 | 81495 | 0.012 |
+| QUERY_SIMPLE_NO_INDEX | 1,000 | 23.39 | 42755 | 0.023 |
+| QUERY_COMPLEX_NO_INDEX | 500 | 15.48 | 32306 | 0.031 |
+| QUERY_ARRAY_NO_INDEX | 500 | 14.77 | 33842 | 0.030 |
+| QUERY_FIND_MANY_NO_INDEX | 100 | 43.47 | 2300 | 0.435 |
+| QUERY_SIMPLE_INDEXED | 1,000 | 21.11 | 47373 | 0.021 |
+| QUERY_COMPLEX_INDEXED | 500 | 15.52 | 32221 | 0.031 |
+| QUERY_ARRAY_INDEXED | 500 | 14.60 | 34253 | 0.029 |
+| QUERY_FIND_MANY_INDEXED | 100 | 42.95 | 2329 | 0.429 |
+| UPDATE | 1,000 | 501.75 | 1993 | 0.502 |
+| DELETE | 1,000 | 144.52 | 6920 | 0.145 |
+
+Reading these numbers honestly:
+
+- The query benchmarks use `findOne`, which stops at the first match. They barely differ with or without an index because a match is found within the first few rows. They measure per-call overhead, not scan cost. The `find().limit(100)` rows are the more representative read.
+- `UPDATE` and `DELETE` filter on the unindexed `name` field and walk the table in order, so the Nth operation scans about N rows. Add an index on the field you filter by and the cost stays flat.
+- `DELETE` was 121 ops/s (8.2 ms/op) before the fix in this branch: `deleteOne` ran an extra `SELECT COUNT(*) ... LIMIT 1` that scanned every matching row (`LIMIT` does not stop an aggregate). It now reads the statement's change count instead.
 
 ## Storage Capacity
 
 | Records | Database Size (MB) | Avg Record Size (bytes) |
 |---------|-------------------|------------------------|
-| 1,000 | 0.44 | 459 |
-| 10,000 | 4.27 | 448 |
-| 50,000 | 21.36 | 448 |
-| 100,000 | 42.75 | 448 |
+| 1,000 | 0.38 | 397 |
+| 10,000 | 4.14 | 435 |
+| 50,000 | 21.35 | 448 |
+| 100,000 | 42.66 | 447 |
 
 ## Notes
 

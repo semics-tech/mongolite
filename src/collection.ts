@@ -1207,20 +1207,20 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       paramsForDelete
     );
 
-    // Get the number of documents that would be deleted
-    const countSql = `SELECT COUNT(*) as count FROM "${this.name}" WHERE ${whereClause} LIMIT 1`;
-    const countResult = await this.db.get<{ count: number }>(countSql, paramsForDelete);
-
     const deleteSql = `
       DELETE FROM "${this.name}"
       WHERE ROWID IN (SELECT ROWID FROM "${this.name}" WHERE ${whereClause} LIMIT 1);
     `;
 
+    // Use the statement's own change count rather than a separate COUNT(*):
+    // `LIMIT 1` on an aggregate does not stop the scan, so the pre-count read every
+    // matching row (a full json_extract table scan on unindexed filters).
+    let result: { changes: number };
     try {
-      await this.db.run(deleteSql, paramsForDelete);
+      result = await this.db.run(deleteSql, paramsForDelete);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'SQLITE_BUSY') {
-        await this.retryWithBackoff(
+        result = await this.retryWithBackoff(
           async () => this.db.run(deleteSql, paramsForDelete),
           `delete for filter ${JSON.stringify(filter)}`
         );
@@ -1229,7 +1229,7 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       }
     }
 
-    return { acknowledged: true, deletedCount: countResult?.count ? 1 : 0 };
+    return { acknowledged: true, deletedCount: result.changes ? 1 : 0 };
   }
 
   /**
