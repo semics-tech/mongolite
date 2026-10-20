@@ -152,9 +152,9 @@ Returns a fast estimate of the total document count.
 
 Drops the collection (deletes the underlying table).
 
-### `async aggregate(pipeline): Promise<unknown[]>`
+### `aggregate(pipeline): { toArray(): Promise<unknown[]> }`
 
-Runs an aggregation pipeline. Supported stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`. `$group` supports the accumulators `$sum`, `$avg`, `$min`, `$max`, `$push`, `$first` and `$last`. Other stages (for example `$lookup`, `$facet`, `$out`) are not implemented.
+Runs an aggregation pipeline; call `.toArray()` to get the results. Supported stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`. `$group` supports the accumulators `$sum`, `$avg`, `$min`, `$max`, `$push`, `$first` and `$last`. Other stages (for example `$lookup`, `$facet`, `$out`) are not implemented and are silently ignored. Expression operators (`$add`, `$cond`, ...) are not evaluated. See [COMPATIBILITY.md](./COMPATIBILITY.md) for the full table.
 
 There is no multi-document transaction API (no sessions, `startTransaction` or `withTransaction`). Each write is atomic on its own, and `insertMany` runs as a single SQLite transaction.
 
