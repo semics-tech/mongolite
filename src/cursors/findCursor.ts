@@ -565,7 +565,17 @@ export class FindCursor<T extends DocumentWithId> {
         FROM json_each(${eachArg}) as array_elements 
         WHERE `;
 
-      if (typeof value === 'object' && value !== null) {
+      const valueKeys =
+        typeof value === 'object' && value !== null && !Array.isArray(value)
+          ? Object.keys(value)
+          : [];
+      if (valueKeys.length > 0 && valueKeys.every((k) => k.startsWith('$') && k !== '$and')) {
+        // Scalar-element form: { $elemMatch: { $gt: 5, $lt: 10 } } / { $eq: 'x' }
+        elemMatchSubquery += this.buildScalarElemMatchConditions(
+          value as Record<string, unknown>,
+          params
+        );
+      } else if (typeof value === 'object' && value !== null) {
         const conditions = this.buildObjectConditions(value, params, 'array_elements');
         elemMatchSubquery += conditions;
       } else {
@@ -579,6 +589,52 @@ export class FindCursor<T extends DocumentWithId> {
     }
 
     return '1=0'; // Unsupported array operator
+  }
+
+  /**
+   * Builds conditions for $elemMatch applied to arrays of scalars, where each operator
+   * applies to the array element itself (`array_elements.value`).
+   */
+  private buildScalarElemMatchConditions(ops: Record<string, unknown>, params: unknown[]): string {
+    const col = 'array_elements.value';
+    const parts: string[] = [];
+    for (const [op, v] of Object.entries(ops)) {
+      switch (op) {
+        case '$eq':
+          params.push(toSQLiteValue(v));
+          parts.push(`${col} = ?`);
+          break;
+        case '$ne':
+          params.push(toSQLiteValue(v));
+          parts.push(`${col} <> ?`);
+          break;
+        case '$gt':
+        case '$gte':
+        case '$lt':
+        case '$lte': {
+          const sqlOp = { $gt: '>', $gte: '>=', $lt: '<', $lte: '<=' }[op];
+          params.push(toSQLiteValue(v));
+          parts.push(`${col} ${sqlOp} ?`);
+          break;
+        }
+        case '$in':
+        case '$nin': {
+          const list = Array.isArray(v) ? v : [];
+          if (list.length === 0) {
+            parts.push(op === '$in' ? '1=0' : '1=1');
+          } else {
+            params.push(...list.map((x) => toSQLiteValue(x)));
+            parts.push(
+              `${col} ${op === '$in' ? 'IN' : 'NOT IN'} (${list.map(() => '?').join(',')})`
+            );
+          }
+          break;
+        }
+        default:
+          throw new Error(`Unsupported operator ${op} inside $elemMatch on scalar array elements`);
+      }
+    }
+    return parts.join(' AND ');
   }
 
   /**

@@ -26,6 +26,15 @@ import { extractRawIndexColumns } from './utils/indexing.js';
 import { ChangeStream, ChangeStreamOptions } from './changeStream.js';
 import { applyProjectionToDocument, resolveProjectionMode } from './utils/projection.js';
 import { evaluateOperators } from './utils/queryOperators.js';
+import {
+  evaluateExpression,
+  evaluateExprFilter,
+  filterUsesExpr,
+  getPath,
+  isOperatorExpression,
+  SUPPORTED_STAGES,
+  SUPPORTED_ACCUMULATORS,
+} from './utils/aggregation.js';
 
 /**
  * Safely stringifies JSON data with validation and error handling.
@@ -189,6 +198,11 @@ function validateDocumentForStorage(doc: unknown, path = 'root'): void {
       validateDocumentForStorage(value, `${path}.${key}`);
     }
   }
+}
+
+/** A $project value that is a computed expression rather than an inclusion/exclusion flag. */
+function isComputedProjection(value: unknown): boolean {
+  return (typeof value === 'string' && value.startsWith('$')) || isOperatorExpression(value);
 }
 
 /**
@@ -1582,7 +1596,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
   /**
    * Executes an aggregation pipeline on the collection.
-   * Supports: $match, $project, $sort, $limit, $skip, $count, $group, $unwind, $addFields.
+   * Supports: $match (incl. $expr), $project, $sort, $limit, $skip, $count, $group
+   * ($sum, $avg, $min, $max, $push, $addToSet, $first, $last, $count), $unwind, $addFields/$set,
+   * $replaceRoot/$replaceWith and $lookup (equality form, local collections).
+   * Unknown stages and accumulators throw.
    * @param pipeline An array of pipeline stage documents.
    * @returns An object with a toArray() method that returns the aggregation result.
    */
@@ -1607,8 +1624,22 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     // Only push the initial $match down to SQL when it is the very first stage.
     // Applying a $match that appears after other stages (e.g. after $unwind/$group) too
     // early would change pipeline semantics.
+    for (const stage of pipeline) {
+      const keys = Object.keys(stage);
+      if (keys.length !== 1) {
+        throw new Error('A pipeline stage specification object must contain exactly one field.');
+      }
+      if (!(SUPPORTED_STAGES as readonly string[]).includes(keys[0])) {
+        throw new Error(`Unrecognized or unsupported aggregation pipeline stage: ${keys[0]}`);
+      }
+    }
+
     const firstStage = pipeline[0];
-    const firstIsMatch = firstStage !== undefined && '$match' in firstStage;
+    // $expr can't be pushed to SQL; it's evaluated in memory instead.
+    const firstIsMatch =
+      firstStage !== undefined &&
+      '$match' in firstStage &&
+      !filterUsesExpr((firstStage as { $match: unknown }).$match);
 
     if (firstIsMatch) {
       const matchFilter = (firstStage as { $match: Filter<T> }).$match;
@@ -1640,9 +1671,46 @@ export class MongoLiteCollection<T extends DocumentWithId> {
           break;
         }
 
-        case '$addFields': {
-          const fields = stage['$addFields'] as Record<string, unknown>;
-          results = results.map((doc) => ({ ...doc, ...fields }));
+        case '$addFields':
+        case '$set': {
+          const fields = stage[stageKey] as Record<string, unknown>;
+          results = results.map((doc) => {
+            const out: Record<string, unknown> = structuredClone(doc);
+            for (const [path, expr] of Object.entries(fields)) {
+              const val = evaluateExpression(doc, expr);
+              if (val === undefined) continue;
+              if (path.includes('.')) this.setNestedValue(out, path, val);
+              else out[path] = val;
+            }
+            return out;
+          });
+          break;
+        }
+
+        case '$replaceRoot':
+        case '$replaceWith': {
+          const expr =
+            stageKey === '$replaceRoot'
+              ? (stage['$replaceRoot'] as { newRoot?: unknown }).newRoot
+              : stage['$replaceWith'];
+          if (expr === undefined) {
+            throw new Error('$replaceRoot requires a newRoot expression');
+          }
+          results = results.map((doc) => {
+            const root = evaluateExpression(doc, expr);
+            if (typeof root !== 'object' || root === null || Array.isArray(root)) {
+              throw new Error("'newRoot' expression must evaluate to an object");
+            }
+            return root as Record<string, unknown>;
+          });
+          break;
+        }
+
+        case '$lookup': {
+          results = await this.applyLookupStage(
+            results,
+            stage['$lookup'] as Record<string, unknown>
+          );
           break;
         }
 
@@ -1687,22 +1755,39 @@ export class MongoLiteCollection<T extends DocumentWithId> {
         }
 
         case '$unwind': {
-          const path =
-            typeof stage['$unwind'] === 'string'
-              ? stage['$unwind']
-              : (stage['$unwind'] as { path: string }).path;
-          const fieldName = path.startsWith('$') ? path.slice(1) : path;
+          const spec = stage['$unwind'];
+          const opts =
+            typeof spec === 'string' ? { path: spec } : (spec as Record<string, unknown>);
+          const path = opts.path;
+          if (typeof path !== 'string' || !path.startsWith('$')) {
+            throw new Error('$unwind requires a path starting with "$"');
+          }
+          const fieldName = path.slice(1);
+          const preserve = opts.preserveNullAndEmptyArrays === true;
+          const indexField =
+            typeof opts.includeArrayIndex === 'string' ? opts.includeArrayIndex : undefined;
           const unwound: Record<string, unknown>[] = [];
           for (const doc of results) {
-            const arrayVal = this.getNestedValue(doc, fieldName);
-            if (Array.isArray(arrayVal)) {
-              for (const item of arrayVal) {
-                const newDoc = { ...doc };
+            const arrayVal = getPath(doc, fieldName);
+            if (Array.isArray(arrayVal) && arrayVal.length > 0) {
+              arrayVal.forEach((item, idx) => {
+                const newDoc = fieldName.includes('.') ? structuredClone(doc) : { ...doc };
                 this.setNestedValue(newDoc, fieldName, item);
+                if (indexField) newDoc[indexField] = idx;
+                unwound.push(newDoc);
+              });
+            } else if (Array.isArray(arrayVal) || arrayVal === null || arrayVal === undefined) {
+              if (preserve) {
+                const newDoc = fieldName.includes('.') ? structuredClone(doc) : { ...doc };
+                if (Array.isArray(arrayVal)) this.unsetNestedValue(newDoc, fieldName);
+                if (indexField) newDoc[indexField] = null;
                 unwound.push(newDoc);
               }
-            } else if (arrayVal !== undefined && arrayVal !== null) {
-              unwound.push(doc);
+            } else {
+              // Non-array operand is treated as a single-element array
+              const newDoc = { ...doc };
+              if (indexField) newDoc[indexField] = null;
+              unwound.push(newDoc);
             }
           }
           results = unwound;
@@ -1726,121 +1811,96 @@ export class MongoLiteCollection<T extends DocumentWithId> {
 
     const idSpec = groupSpec['_id'];
 
-    for (const doc of docs) {
-      let groupKey: unknown;
-      if (idSpec === null) {
-        groupKey = null;
-      } else if (typeof idSpec === 'string' && idSpec.startsWith('$')) {
-        groupKey = this.getNestedValue(doc, idSpec.slice(1));
-      } else if (typeof idSpec === 'object' && idSpec !== null) {
-        const keyObj: Record<string, unknown> = {};
-        for (const [k, expr] of Object.entries(idSpec as Record<string, unknown>)) {
-          if (typeof expr === 'string' && expr.startsWith('$')) {
-            keyObj[k] = this.getNestedValue(doc, expr.slice(1));
-          } else {
-            keyObj[k] = expr;
-          }
-        }
-        groupKey = keyObj;
-      } else {
-        groupKey = idSpec;
+    // Validate accumulators up front so an unknown one throws even for empty input.
+    const accumulators: [string, string, unknown][] = [];
+    for (const [field, expr] of Object.entries(groupSpec)) {
+      if (field === '_id') continue;
+      if (typeof expr !== 'object' || expr === null || Array.isArray(expr)) {
+        throw new Error(`The field '${field}' must be an accumulator object`);
       }
+      const keys = Object.keys(expr);
+      if (keys.length !== 1) {
+        throw new Error(`The field '${field}' must specify exactly one accumulator`);
+      }
+      if (!(SUPPORTED_ACCUMULATORS as readonly string[]).includes(keys[0])) {
+        throw new Error(`Unknown or unsupported $group accumulator operator: ${keys[0]}`);
+      }
+      accumulators.push([field, keys[0], (expr as Record<string, unknown>)[keys[0]]]);
+    }
 
+    const keyValues = new Map<string, unknown>();
+    for (const doc of docs) {
+      let groupKey: unknown = idSpec === undefined ? null : evaluateExpression(doc, idSpec);
+      if (groupKey === undefined) groupKey = null;
       const keyStr = JSON.stringify(groupKey);
       if (!groups.has(keyStr)) {
         groups.set(keyStr, []);
+        keyValues.set(keyStr, groupKey);
       }
       groups.get(keyStr)!.push(doc);
     }
 
     const results: Record<string, unknown>[] = [];
     for (const [keyStr, groupDocs] of groups) {
-      const groupResult: Record<string, unknown> = { _id: JSON.parse(keyStr) };
+      const groupResult: Record<string, unknown> = { _id: keyValues.get(keyStr) };
 
-      for (const [field, expr] of Object.entries(groupSpec)) {
-        if (field === '_id') continue;
-        if (typeof expr === 'object' && expr !== null) {
-          const aggOp = Object.keys(expr as object)[0];
-          const aggArg = (expr as Record<string, unknown>)[aggOp];
-
-          switch (aggOp) {
-            case '$sum': {
-              if (typeof aggArg === 'number') {
-                groupResult[field] = groupDocs.length * aggArg;
-              } else if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                groupResult[field] = groupDocs.reduce((sum, doc) => {
-                  const val = this.getNestedValue(doc, fieldName);
-                  return sum + (typeof val === 'number' ? val : 0);
-                }, 0);
-              }
-              break;
-            }
-            case '$avg': {
-              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                const nums = groupDocs
-                  .map((doc) => this.getNestedValue(doc, fieldName))
-                  .filter((v) => typeof v === 'number') as number[];
-                groupResult[field] =
-                  nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
-              }
-              break;
-            }
-            case '$min': {
-              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                const vals = groupDocs
-                  .map((doc) => this.getNestedValue(doc, fieldName))
-                  .filter((v) => v !== undefined && v !== null);
-                groupResult[field] =
-                  vals.length > 0 ? vals.reduce((a, b) => (a < b ? a : b)) : null;
-              }
-              break;
-            }
-            case '$max': {
-              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                const vals = groupDocs
-                  .map((doc) => this.getNestedValue(doc, fieldName))
-                  .filter((v) => v !== undefined && v !== null);
-                groupResult[field] =
-                  vals.length > 0 ? vals.reduce((a, b) => (a > b ? a : b)) : null;
-              }
-              break;
-            }
-            case '$push': {
-              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                groupResult[field] = groupDocs.map((doc) => this.getNestedValue(doc, fieldName));
-              } else {
-                groupResult[field] = groupDocs.map(() => aggArg);
-              }
-              break;
-            }
-            case '$first': {
-              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                groupResult[field] =
-                  groupDocs.length > 0 ? this.getNestedValue(groupDocs[0], fieldName) : null;
-              }
-              break;
-            }
-            case '$last': {
-              if (typeof aggArg === 'string' && aggArg.startsWith('$')) {
-                const fieldName = aggArg.slice(1);
-                groupResult[field] =
-                  groupDocs.length > 0
-                    ? this.getNestedValue(groupDocs[groupDocs.length - 1], fieldName)
-                    : null;
-              }
-              break;
-            }
-            case '$count': {
-              groupResult[field] = groupDocs.length;
-              break;
-            }
+      for (const [field, aggOp, aggArg] of accumulators) {
+        const vals = (): unknown[] => groupDocs.map((doc) => evaluateExpression(doc, aggArg));
+        switch (aggOp) {
+          case '$sum':
+            groupResult[field] = vals().reduce<number>(
+              (sum, v) => sum + (typeof v === 'number' ? v : 0),
+              0
+            );
+            break;
+          case '$avg': {
+            const nums = vals().filter((v) => typeof v === 'number') as number[];
+            groupResult[field] =
+              nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+            break;
           }
+          case '$min': {
+            const v = vals().filter((x) => x !== undefined && x !== null) as number[];
+            groupResult[field] = v.length > 0 ? v.reduce((a, b) => (a < b ? a : b)) : null;
+            break;
+          }
+          case '$max': {
+            const v = vals().filter((x) => x !== undefined && x !== null) as number[];
+            groupResult[field] = v.length > 0 ? v.reduce((a, b) => (a > b ? a : b)) : null;
+            break;
+          }
+          case '$push':
+            groupResult[field] = vals().filter((v) => v !== undefined);
+            break;
+          case '$addToSet': {
+            const seen = new Set<string>();
+            const out: unknown[] = [];
+            for (const v of vals()) {
+              if (v === undefined) continue;
+              const k = v instanceof Date ? `d:${v.getTime()}` : JSON.stringify(v);
+              if (seen.has(k)) continue;
+              seen.add(k);
+              out.push(v);
+            }
+            groupResult[field] = out;
+            break;
+          }
+          case '$first': {
+            const v = groupDocs.length > 0 ? evaluateExpression(groupDocs[0], aggArg) : null;
+            groupResult[field] = v === undefined ? null : v;
+            break;
+          }
+          case '$last': {
+            const v =
+              groupDocs.length > 0
+                ? evaluateExpression(groupDocs[groupDocs.length - 1], aggArg)
+                : null;
+            groupResult[field] = v === undefined ? null : v;
+            break;
+          }
+          case '$count':
+            groupResult[field] = groupDocs.length;
+            break;
         }
       }
 
@@ -1848,6 +1908,54 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     }
 
     return results;
+  }
+
+  /**
+   * Applies a $lookup stage (equality match against another collection in the same database).
+   * @private
+   */
+  private async applyLookupStage(
+    docs: Record<string, unknown>[],
+    spec: Record<string, unknown>
+  ): Promise<Record<string, unknown>[]> {
+    const { from, localField, foreignField, as } = spec as {
+      from?: unknown;
+      localField?: unknown;
+      foreignField?: unknown;
+      as?: unknown;
+    };
+    if ('pipeline' in spec || 'let' in spec) {
+      throw new Error('$lookup with pipeline/let is not supported; use localField/foreignField');
+    }
+    if (
+      typeof from !== 'string' ||
+      typeof localField !== 'string' ||
+      typeof foreignField !== 'string' ||
+      typeof as !== 'string'
+    ) {
+      throw new Error('$lookup requires string from, localField, foreignField and as');
+    }
+
+    const foreign = (await new MongoLiteCollection<DocumentWithId>(this.db, from, this.options)
+      .find({} as Filter<DocumentWithId>)
+      .toArray()) as Record<string, unknown>[];
+
+    const key = (v: unknown): string => JSON.stringify(v === undefined ? null : v);
+
+    return docs.map((doc) => {
+      const local = getPath(doc, localField);
+      const localKeys = new Set(
+        (Array.isArray(local) ? (local.length > 0 ? local : [null]) : [local]).map(key)
+      );
+      const matches = foreign.filter((f) => {
+        const fv = getPath(f, foreignField);
+        const fvs = Array.isArray(fv) ? [...fv, fv] : [fv];
+        return fvs.some((x) => localKeys.has(key(x)));
+      });
+      const out: Record<string, unknown> = { ...doc };
+      this.setNestedValue(out, as, matches);
+      return out;
+    });
   }
 
   /**
@@ -1866,21 +1974,22 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     // for mode-determination purposes, matching real $project behavior.
     const modeInput: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(projection)) {
-      modeInput[key] = typeof value === 'string' && value.startsWith('$') ? 1 : value;
+      modeInput[key] = isComputedProjection(value) ? 1 : value;
     }
     const mode = resolveProjectionMode(modeInput as unknown as Projection<DocumentWithId>);
 
     const base = applyProjectionToDocument(
       doc as DocumentWithId,
-      projection as unknown as Projection<DocumentWithId>
+      modeInput as unknown as Projection<DocumentWithId>
     );
 
     if (mode !== 'include') return base;
 
     const result: Record<string, unknown> = { ...base };
     for (const [field, val] of Object.entries(projection)) {
-      if (typeof val === 'string' && val.startsWith('$')) {
-        result[field] = this.getNestedValue(doc, val.slice(1));
+      if (isComputedProjection(val)) {
+        const computed = evaluateExpression(doc, val);
+        if (computed !== undefined) this.setNestedValue(result, field, computed);
       }
     }
     return result;
@@ -1904,6 +2013,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       }
       if (key === '$nor' && Array.isArray(value)) {
         if (value.some((f) => this.matchesFilter(doc, f))) return false;
+        continue;
+      }
+      if (key === '$expr') {
+        if (!evaluateExprFilter(doc, value)) return false;
         continue;
       }
       if (key.startsWith('$')) continue;

@@ -64,6 +64,8 @@ const cases: OperatorCase[] = [
   { op: '$regex', description: '$regex matches with case-insensitive flag', filter: { s: { $regex: 'hello', $options: 'i' } }, expectedIds: ['1', '3'] },
   { op: '$size', description: '$size matches array length', filter: { tags: { $size: 1 } }, expectedIds: ['2'] },
   { op: '$type', description: '$type matches BSON type', filter: { mixed: { $type: 'string' } }, expectedIds: ['2'] },
+  { op: '$elemMatch', description: '$elemMatch matches scalar array elements', filter: { tags: { $elemMatch: { $eq: 'b' } } }, expectedIds: ['1'] },
+  { op: '$elemMatch', description: '$elemMatch with several scalar operators', filter: { tags: { $elemMatch: { $gte: 'b', $lt: 'd' } } }, expectedIds: ['1'] },
   { op: '$mod', description: '$mod matches divisor/remainder pairs', filter: { n: { $mod: [5, 0] } }, expectedIds: ['1', '3'] },
 ];
 
