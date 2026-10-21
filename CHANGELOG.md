@@ -1,3 +1,10 @@
+## [1.4.2](https://github.com/semics-tech/mongolite/compare/v1.4.1...v1.4.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **aggregate:** throw on unknown stages/accumulators, evaluate expressions, add $lookup, $replaceRoot, $addToSet ([#113](https://github.com/semics-tech/mongolite/issues/113)) ([67558ac](https://github.com/semics-tech/mongolite/commit/67558ac144fc6cdc39bc33c1e29952813f6fb312))
+
 ## [1.4.1](https://github.com/semics-tech/mongolite/compare/v1.4.0...v1.4.1) (2026-10-18)
 
 
