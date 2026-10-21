@@ -4,7 +4,7 @@ MongoLite implements a **subset** of the MongoDB driver API on top of SQLite. Th
 
 Legend: ✅ supported · ⚠️ partial (see note) · ❌ not supported
 
-> **Note:** unknown aggregation stages, `$group` accumulators and expression operators **throw an error** rather than being ignored. This applies once [#113](https://github.com/semics-tech/mongolite/pull/113) is merged; until then they are silently ignored.
+> **Note:** unknown aggregation stages, `$group` accumulators and expression operators **throw an error** rather than being ignored.
 
 ## Aggregation stages
 

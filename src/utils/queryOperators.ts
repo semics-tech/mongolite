@@ -20,6 +20,7 @@ export const SUPPORTED_QUERY_OPERATORS = [
   '$size',
   '$type',
   '$mod',
+  '$elemMatch',
 ] as const;
 
 function matchesBsonType(value: unknown, bsonType: string | number): boolean {
@@ -132,6 +133,15 @@ export function evaluateOperator(
       const [divisor, remainder] = opValue as [number, number];
       return Math.trunc(docValue) % divisor === remainder;
     }
+    case '$elemMatch': {
+      if (!Array.isArray(docValue) || typeof opValue !== 'object' || opValue === null) return false;
+      const spec = opValue as Record<string, unknown>;
+      const keys = Object.keys(spec);
+      const scalarForm = keys.length > 0 && keys.every((k) => k.startsWith('$') && !LOGICAL.has(k));
+      return docValue.some((el) =>
+        scalarForm ? evaluateOperators(el, spec) : matchesElementFilter(el, spec)
+      );
+    }
     case '$options':
       return true; // consumed alongside $regex, not an independent predicate
     default:
@@ -145,6 +155,44 @@ export function evaluateOperators(docValue: unknown, ops: Record<string, unknown
   for (const [op, opValue] of Object.entries(ops)) {
     if (op === '$options') continue;
     if (!evaluateOperator(op, docValue, opValue, regexOptions)) return false;
+  }
+  return true;
+}
+
+const LOGICAL = new Set(['$and', '$or', '$nor']);
+
+function getPathValue(obj: unknown, path: string): unknown {
+  let cur: unknown = obj;
+  for (const k of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[k];
+  }
+  return cur;
+}
+
+/** Matches one array element (an object) against an $elemMatch sub-filter. */
+function matchesElementFilter(el: unknown, filter: Record<string, unknown>): boolean {
+  for (const [key, cond] of Object.entries(filter)) {
+    if ((key === '$and' || key === '$or' || key === '$nor') && Array.isArray(cond)) {
+      const results = cond.map((f) => matchesElementFilter(el, f as Record<string, unknown>));
+      if (key === '$and' && !results.every(Boolean)) return false;
+      if (key === '$or' && !results.some(Boolean)) return false;
+      if (key === '$nor' && results.some(Boolean)) return false;
+      continue;
+    }
+    const v = getPathValue(el, key);
+    const isOps =
+      typeof cond === 'object' &&
+      cond !== null &&
+      !(cond instanceof RegExp) &&
+      !(cond instanceof Date) &&
+      !Array.isArray(cond) &&
+      Object.keys(cond).some((k) => k.startsWith('$'));
+    if (isOps) {
+      if (!evaluateOperators(v, cond as Record<string, unknown>)) return false;
+    } else if (JSON.stringify(v) !== JSON.stringify(cond)) {
+      return false;
+    }
   }
   return true;
 }
