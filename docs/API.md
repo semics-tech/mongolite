@@ -152,9 +152,9 @@ Returns a fast estimate of the total document count.
 
 Drops the collection (deletes the underlying table).
 
-### `async aggregate(pipeline): Promise<unknown[]>`
+### `aggregate(pipeline): { toArray(): Promise<unknown[]> }`
 
-Runs an aggregation pipeline. Supported stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`. `$group` supports the accumulators `$sum`, `$avg`, `$min`, `$max`, `$push`, `$first` and `$last`. Other stages (for example `$lookup`, `$facet`, `$out`) are not implemented.
+Runs an aggregation pipeline; call `.toArray()` to get the results. Supported stages: `$match` (including `$expr`), `$project` (including computed fields), `$addFields`/`$set`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind` (including `preserveNullAndEmptyArrays` and `includeArrayIndex`), `$replaceRoot`/`$replaceWith`, and `$lookup` (equality form `from`/`localField`/`foreignField`/`as` against another collection in the same database; the `pipeline`/`let` form is not supported). `$group` supports the accumulators `$sum`, `$avg`, `$min`, `$max`, `$push`, `$addToSet`, `$first`, `$last` and `$count`. Expressions support field paths and a common subset of operators (`$add`, `$subtract`, `$multiply`, `$divide`, `$mod`, `$concat`, `$toUpper`, `$toLower`, comparison and boolean operators, `$cond`, `$ifNull`, `$size`, `$arrayElemAt`, `$first`, `$last`, `$literal`). Unknown stages, accumulators or expression operators throw an error rather than being ignored. See [COMPATIBILITY.md](./COMPATIBILITY.md) for the full table.
 
 There is no multi-document transaction API (no sessions, `startTransaction` or `withTransaction`). Each write is atomic on its own, and `insertMany` runs as a single SQLite transaction.
 

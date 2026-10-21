@@ -16,7 +16,7 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 
 ## Features
 
-- **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate` (a subset of stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`), and more
+- **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate` (a subset of stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`, `$lookup`, `$replaceRoot`; unknown stages throw), and more
 - **SQLite persistence** — single file, zero configuration, works offline
 - **Automatic `_id` generation** — UUID assigned on insert if not provided
 - **WAL mode** — Write-Ahead Logging for better concurrent read access, on by default
@@ -95,7 +95,7 @@ raw SQL are a menu item away when you want them. See [the CLI docs](./docs/CLI.m
 | TypeScript, strict mode                             | ✅          | ✅                       | ✅                   | ⚠️ (community types)        | ⚠️ (community types)        | ✅      |
 | Actively maintained                                 | ✅          | ✅                       | ✅                   | ⚠️ (little recent activity) | ⚠️ (varies; check the repo) | ✅      |
 
-_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has no multi-document transaction API ([API reference](./docs/API.md#async-aggregatepipeline-promiseunknown))._
+_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has no multi-document transaction API ([API reference](./docs/COMPATIBILITY.md))._
 
 MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
 
@@ -104,6 +104,7 @@ MongoLite's niche: the MongoDB query API you already know, running anywhere SQLi
 | Topic                                              | Description                                                            |
 | -------------------------------------------------- | ---------------------------------------------------------------------- |
 | [API Reference](./docs/API.md)                     | Full API docs: methods, query operators, update operators              |
+| [MongoDB Compatibility](./docs/COMPATIBILITY.md)   | Supported, partial and unsupported operators, stages and APIs          |
 | [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                    |
 | [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API    |
 | [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                        |
