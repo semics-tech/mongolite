@@ -75,7 +75,7 @@ main();
 ## Explore a database from the terminal
 
 ```bash
-npx mongolite
+npx @semics-tech/mongolite
 ```
 
 Picks up the SQLite files around you, lists the collections it finds inside,
@@ -107,8 +107,8 @@ MongoLite's niche: the MongoDB query API you already know, running anywhere SQLi
 | [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                    |
 | [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API    |
 | [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                        |
-| [CLI](./docs/CLI.md)                               | `npx mongolite` — guided explorer for browsing and querying a database |
-| [Query Debugger](./docs/DEBUGGER.md)               | The older command-driven REPL (`npx mongolite --repl`)                 |
+| [CLI](./docs/CLI.md)                               | `npx @semics-tech/mongolite` — guided explorer for browsing and querying a database |
+| [Query Debugger](./docs/DEBUGGER.md)               | The older command-driven REPL (`npx @semics-tech/mongolite --repl`)                 |
 | [Benchmarks](./docs/BENCHMARKS.md)                 | Performance benchmarks and storage characteristics                     |
 | [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object                     |
 
