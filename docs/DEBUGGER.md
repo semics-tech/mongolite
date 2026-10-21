@@ -1,6 +1,6 @@
 # MongoLite Query Debugger (command mode)
 
-> **Looking for the interactive explorer?** `npx mongolite` walks you through
+> **Looking for the interactive explorer?** `npx @semics-tech/mongolite` walks you through
 > choosing a database, choosing a collection and building a query without
 > MongoDB syntax — see [CLI.md](./CLI.md). This page documents the older
 > command-driven REPL, which is still available behind `--repl`.
@@ -16,7 +16,7 @@ A command-driven debugging tool for MongoLite queries that helps you:
 The debugger is included with the `@semics-tech/mongolite` package. You can use it via npx:
 
 ```bash
-npx mongolite --repl
+npx @semics-tech/mongolite --repl
 ```
 
 ## Usage
@@ -25,16 +25,16 @@ npx mongolite --repl
 
 ```bash
 # Use with default database file (mongolite.db in current directory)
-npx mongolite --repl
+npx @semics-tech/mongolite --repl
 
 # Specify a specific database file
-npx mongolite --repl -d ./path/to/your/database.db
+npx @semics-tech/mongolite --repl -d ./path/to/your/database.db
 
 # Start with a specific collection selected
-npx mongolite --repl -c users
+npx @semics-tech/mongolite --repl -c users
 
 # Enable verbose output
-npx mongolite --repl --verbose
+npx @semics-tech/mongolite --repl --verbose
 
 # `mongolite-debug` is an alias of `mongolite`, so this works too
 npx mongolite-debug --repl
@@ -115,7 +115,7 @@ SELECT _id, json_extract(data, '$.name') as name, json_extract(data, '$.departme
 
 ### Debugging Workflow
 
-1. **Start the debugger**: `npx mongolite --repl -d myapp.db`
+1. **Start the debugger**: `npx @semics-tech/mongolite --repl -d myapp.db`
 2. **List collections**: `.collections`
 3. **Select a collection**: `.use users`
 4. **Sample data**: `.sample 3`
@@ -171,7 +171,7 @@ SELECT _id, json_extract(data, '$.name') as name, json_extract(data, '$.departme
 ❌ Failed to connect to database: SQLITE_CANTOPEN: unable to open database file
 
 💡 Tip: Make sure the database file exists or specify a different path with -d
-   Example: npx mongolite --repl -d ./path/to/your/database.db
+   Example: npx @semics-tech/mongolite --repl -d ./path/to/your/database.db
 ```
 
 ### Empty Collections

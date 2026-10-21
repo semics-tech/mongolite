@@ -5,7 +5,7 @@ database file, picking a collection, and then running an operation — building
 queries out of plain-English choices rather than MongoDB syntax.
 
 ```bash
-npx mongolite
+npx @semics-tech/mongolite
 ```
 
 That is the whole command. Everything else is a shortcut.
@@ -150,9 +150,9 @@ Under **Advanced**:
 ## Options
 
 ```
-npx mongolite                      Start the guided explorer
-npx mongolite ./app.db             Open a specific database
-npx mongolite ./app.db users       Open a specific collection
+npx @semics-tech/mongolite                      Start the guided explorer
+npx @semics-tech/mongolite ./app.db             Open a specific database
+npx @semics-tech/mongolite ./app.db users       Open a specific collection
 ```
 
 | Option | Description |
@@ -186,7 +186,7 @@ When stdin is not a TTY the same prompts print as numbered lists and read
 answers a line at a time, so a session can be scripted or captured:
 
 ```bash
-printf '1\n2\n6\n\n13\n' | npx mongolite    # open the first database, first
+printf '1\n2\n6\n\n13\n' | npx @semics-tech/mongolite    # open the first database, first
                                             # collection, show its fields, quit
 ```
 
