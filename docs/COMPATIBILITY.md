@@ -34,6 +34,7 @@ Everything after the first stage runs in memory in JavaScript, so large pipeline
 | `$avg`, `$min`, `$max`                                          | ✅     | Any expression. `$avg` ignores non-numbers                    |
 | `$push`, `$addToSet`                                            | ✅     | Any expression. `$addToSet` de-duplicates by value            |
 | `$first`, `$last`                                               | ✅     | Order is the order of the preceding stages (no implicit sort) |
+| `$count`                                                        | ✅     | Counts the documents in the group                             |
 | `$stdDevPop`, `$stdDevSamp`, `$mergeObjects`, `$top`, `$bottom` | ❌     | Throws                                                        |
 
 ### Aggregation expressions
