@@ -16,7 +16,7 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 
 ## Features
 
-- **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate` (a subset of stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`), and more
+- **MongoDB-compatible API** — `insertOne`, `findOne`, `updateOne`, `deleteOne`, `find`, `aggregate` (a subset of stages: `$match`, `$project`, `$addFields`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind`, `$lookup`, `$replaceRoot`; unknown stages throw), and more
 - **SQLite persistence** — single file, zero configuration, works offline
 - **Automatic `_id` generation** — UUID assigned on insert if not provided
 - **WAL mode** — Write-Ahead Logging for better concurrent read access, on by default
