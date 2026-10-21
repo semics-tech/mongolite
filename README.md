@@ -101,17 +101,17 @@ MongoLite's niche: the MongoDB query API you already know, running anywhere SQLi
 
 ## Documentation
 
-| Topic                                              | Description                                                            |
-| -------------------------------------------------- | ---------------------------------------------------------------------- |
-| [API Reference](./docs/API.md)                     | Full API docs: methods, query operators, update operators              |
-| [MongoDB Compatibility](./docs/COMPATIBILITY.md)   | Supported, partial and unsupported operators, stages and APIs          |
-| [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                    |
-| [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API    |
-| [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                        |
+| Topic                                              | Description                                                                         |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [API Reference](./docs/API.md)                     | Full API docs: methods, query operators, update operators                           |
+| [MongoDB Compatibility](./docs/COMPATIBILITY.md)   | Supported, partial and unsupported operators, stages and APIs                       |
+| [Change Streams](./docs/CHANGE_STREAMS.md)         | Real-time change tracking with `collection.watch()`                                 |
+| [Syncing to MongoDB](./docs/SYNC.md)               | Replication to an upstream MongoDB, directly or through an HTTP API                 |
+| [JSON Safety](./docs/JSON_SAFETY.md)               | Document validation and corrupted data recovery                                     |
 | [CLI](./docs/CLI.md)                               | `npx @semics-tech/mongolite` — guided explorer for browsing and querying a database |
 | [Query Debugger](./docs/DEBUGGER.md)               | The older command-driven REPL (`npx @semics-tech/mongolite --repl`)                 |
-| [Benchmarks](./docs/BENCHMARKS.md)                 | Performance benchmarks and storage characteristics                     |
-| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object                     |
+| [Benchmarks](./docs/BENCHMARKS.md)                 | Performance benchmarks and storage characteristics                                  |
+| [Cloudflare Durable Objects](./docs/CLOUDFLARE.md) | Using MongoLite inside a Cloudflare Durable Object                                  |
 
 ## Backend Examples
 

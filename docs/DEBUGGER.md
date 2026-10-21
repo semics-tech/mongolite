@@ -141,7 +141,7 @@ SELECT _id, json_extract(data, '$.name') as name, json_extract(data, '$.departme
 # Test $elemMatch queries
 .find {"reviews": {"$elemMatch": {"rating": {"$gte": 4}}}}
 
-# Test $all queries  
+# Test $all queries
 .find {"tags": {"$all": ["computer", "work"]}}
 ```
 
