@@ -37,14 +37,54 @@ interface OperatorCase {
 }
 
 const cases: OperatorCase[] = [
-  { op: '$eq', description: '$eq matches an exact value', filter: { n: { $eq: 10 } }, expectedIds: ['1'] },
-  { op: '$ne', description: '$ne excludes an exact value', filter: { n: { $ne: 10 } }, expectedIds: ['2', '3'] },
-  { op: '$gt', description: '$gt matches greater values', filter: { n: { $gt: 10 } }, expectedIds: ['2', '3'] },
-  { op: '$gte', description: '$gte matches greater-or-equal values', filter: { n: { $gte: 11 } }, expectedIds: ['2', '3'] },
-  { op: '$lt', description: '$lt matches lesser values', filter: { n: { $lt: 11 } }, expectedIds: ['1'] },
-  { op: '$lte', description: '$lte matches lesser-or-equal values', filter: { n: { $lte: 10 } }, expectedIds: ['1'] },
-  { op: '$in', description: '$in matches any listed value', filter: { n: { $in: [10, 15] } }, expectedIds: ['1', '3'] },
-  { op: '$nin', description: '$nin excludes listed values', filter: { n: { $nin: [10, 15] } }, expectedIds: ['2'] },
+  {
+    op: '$eq',
+    description: '$eq matches an exact value',
+    filter: { n: { $eq: 10 } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$ne',
+    description: '$ne excludes an exact value',
+    filter: { n: { $ne: 10 } },
+    expectedIds: ['2', '3'],
+  },
+  {
+    op: '$gt',
+    description: '$gt matches greater values',
+    filter: { n: { $gt: 10 } },
+    expectedIds: ['2', '3'],
+  },
+  {
+    op: '$gte',
+    description: '$gte matches greater-or-equal values',
+    filter: { n: { $gte: 11 } },
+    expectedIds: ['2', '3'],
+  },
+  {
+    op: '$lt',
+    description: '$lt matches lesser values',
+    filter: { n: { $lt: 11 } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$lte',
+    description: '$lte matches lesser-or-equal values',
+    filter: { n: { $lte: 10 } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$in',
+    description: '$in matches any listed value',
+    filter: { n: { $in: [10, 15] } },
+    expectedIds: ['1', '3'],
+  },
+  {
+    op: '$nin',
+    description: '$nin excludes listed values',
+    filter: { n: { $nin: [10, 15] } },
+    expectedIds: ['2'],
+  },
   // Regression for a bug where the SQL path silently excluded documents missing the field
   // entirely (as opposed to holding it as an explicit `null`): json_type() returns SQL NULL
   // for a path that doesn't exist, and `NULL != 'array'` is itself NULL, not TRUE, so the
@@ -58,15 +98,60 @@ const cases: OperatorCase[] = [
     filter: { opt: { $nin: ['present'] } },
     expectedIds: ['2', '3'],
   },
-  { op: '$all', description: '$all requires every listed element present', filter: { tags: { $all: ['a', 'b'] } }, expectedIds: ['1'] },
-  { op: '$exists', description: '$exists matches documents with the field present', filter: { opt: { $exists: true } }, expectedIds: ['1'] },
-  { op: '$not', description: '$not negates a nested operator', filter: { n: { $not: { $gt: 10 } } }, expectedIds: ['1'] },
-  { op: '$regex', description: '$regex matches with case-insensitive flag', filter: { s: { $regex: 'hello', $options: 'i' } }, expectedIds: ['1', '3'] },
-  { op: '$size', description: '$size matches array length', filter: { tags: { $size: 1 } }, expectedIds: ['2'] },
-  { op: '$type', description: '$type matches BSON type', filter: { mixed: { $type: 'string' } }, expectedIds: ['2'] },
-  { op: '$elemMatch', description: '$elemMatch matches scalar array elements', filter: { tags: { $elemMatch: { $eq: 'b' } } }, expectedIds: ['1'] },
-  { op: '$elemMatch', description: '$elemMatch with several scalar operators', filter: { tags: { $elemMatch: { $gte: 'b', $lt: 'd' } } }, expectedIds: ['1'] },
-  { op: '$mod', description: '$mod matches divisor/remainder pairs', filter: { n: { $mod: [5, 0] } }, expectedIds: ['1', '3'] },
+  {
+    op: '$all',
+    description: '$all requires every listed element present',
+    filter: { tags: { $all: ['a', 'b'] } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$exists',
+    description: '$exists matches documents with the field present',
+    filter: { opt: { $exists: true } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$not',
+    description: '$not negates a nested operator',
+    filter: { n: { $not: { $gt: 10 } } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$regex',
+    description: '$regex matches with case-insensitive flag',
+    filter: { s: { $regex: 'hello', $options: 'i' } },
+    expectedIds: ['1', '3'],
+  },
+  {
+    op: '$size',
+    description: '$size matches array length',
+    filter: { tags: { $size: 1 } },
+    expectedIds: ['2'],
+  },
+  {
+    op: '$type',
+    description: '$type matches BSON type',
+    filter: { mixed: { $type: 'string' } },
+    expectedIds: ['2'],
+  },
+  {
+    op: '$elemMatch',
+    description: '$elemMatch matches scalar array elements',
+    filter: { tags: { $elemMatch: { $eq: 'b' } } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$elemMatch',
+    description: '$elemMatch with several scalar operators',
+    filter: { tags: { $elemMatch: { $gte: 'b', $lt: 'd' } } },
+    expectedIds: ['1'],
+  },
+  {
+    op: '$mod',
+    description: '$mod matches divisor/remainder pairs',
+    filter: { n: { $mod: [5, 0] } },
+    expectedIds: ['1', '3'],
+  },
 ];
 
 function sortedIds(docs: { _id?: string }[]): string[] {
@@ -108,7 +193,9 @@ describe('Operator coverage — find() vs aggregation $match must agree', () => 
       });
 
       it('aggregation $match after another stage (in-memory path) matches the expected documents', async () => {
-        const result = await collection.aggregate([{ $addFields: {} }, { $match: filter }]).toArray();
+        const result = await collection
+          .aggregate([{ $addFields: {} }, { $match: filter }])
+          .toArray();
         assert.deepStrictEqual(sortedIds(result), expectedIds);
       });
     });

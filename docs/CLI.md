@@ -5,7 +5,7 @@ database file, picking a collection, and then running an operation — building
 queries out of plain-English choices rather than MongoDB syntax.
 
 ```bash
-npx mongolite
+npx @semics-tech/mongolite
 ```
 
 That is the whole command. Everything else is a shortcut.
@@ -91,15 +91,15 @@ inferred schema, with their type, how often they appear, and an example value:
 The conditions offered next depend on the field's type — no operators that
 cannot apply:
 
-| Field type | Conditions |
-|------------|------------|
-| text | is · is not · contains the text · starts with · ends with · is one of · is none of · matches a regular expression |
-| number | equals · does not equal · is greater than · is at least · is less than · is at most · is between · is one of |
-| date | is exactly · is after · is on or after · is before · is on or before · is between |
-| true/false | is true · is false |
-| array | contains · contains any of · contains all of · has exactly N items |
-| object | equals this JSON |
-| any | has a value · is missing or empty |
+| Field type | Conditions                                                                                                        |
+| ---------- | ----------------------------------------------------------------------------------------------------------------- |
+| text       | is · is not · contains the text · starts with · ends with · is one of · is none of · matches a regular expression |
+| number     | equals · does not equal · is greater than · is at least · is less than · is at most · is between · is one of      |
+| date       | is exactly · is after · is on or after · is before · is on or before · is between                                 |
+| true/false | is true · is false                                                                                                |
+| array      | contains · contains any of · contains all of · has exactly N items                                                |
+| object     | equals this JSON                                                                                                  |
+| any        | has a value · is missing or empty                                                                                 |
 
 When a field only holds a handful of distinct values, you pick the value from a
 list instead of typing it — no guessing at spelling or capitalisation:
@@ -150,35 +150,35 @@ Under **Advanced**:
 ## Options
 
 ```
-npx mongolite                      Start the guided explorer
-npx mongolite ./app.db             Open a specific database
-npx mongolite ./app.db users       Open a specific collection
+npx @semics-tech/mongolite                      Start the guided explorer
+npx @semics-tech/mongolite ./app.db             Open a specific database
+npx @semics-tech/mongolite ./app.db users       Open a specific collection
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-d, --database <path>` | Database file to open |
-| `-c, --collection <name>` | Collection to start in |
-| `--sample <n>` | Documents sampled when inferring fields (default 200) |
-| `--page-size <n>` | Results per page (default 20) |
-| `--repl` | Use the older command-driven debugger |
-| `-v, --verbose` | Log the SQL as it is built |
-| `-h, --help` | Show help |
-| `-V, --version` | Show the version |
+| Option                    | Description                                           |
+| ------------------------- | ----------------------------------------------------- |
+| `-d, --database <path>`   | Database file to open                                 |
+| `-c, --collection <name>` | Collection to start in                                |
+| `--sample <n>`            | Documents sampled when inferring fields (default 200) |
+| `--page-size <n>`         | Results per page (default 20)                         |
+| `--repl`                  | Use the older command-driven debugger                 |
+| `-v, --verbose`           | Log the SQL as it is built                            |
+| `-h, --help`              | Show help                                             |
+| `-V, --version`           | Show the version                                      |
 
 A path or collection that does not exist is not fatal — the CLI says so and
 falls back to letting you pick.
 
 ## Keys
 
-| Key | Action |
-|-----|--------|
-| ↑ / ↓ | Move through the list |
-| any letter | Filter the list |
-| Backspace | Undo a filter character |
-| Enter | Choose |
-| Esc | Go back a step |
-| Ctrl+C | Quit |
+| Key        | Action                  |
+| ---------- | ----------------------- |
+| ↑ / ↓      | Move through the list   |
+| any letter | Filter the list         |
+| Backspace  | Undo a filter character |
+| Enter      | Choose                  |
+| Esc        | Go back a step          |
+| Ctrl+C     | Quit                    |
 
 ## Non-interactive use
 
@@ -186,7 +186,7 @@ When stdin is not a TTY the same prompts print as numbered lists and read
 answers a line at a time, so a session can be scripted or captured:
 
 ```bash
-printf '1\n2\n6\n\n13\n' | npx mongolite    # open the first database, first
+printf '1\n2\n6\n\n13\n' | npx @semics-tech/mongolite    # open the first database, first
                                             # collection, show its fields, quit
 ```
 

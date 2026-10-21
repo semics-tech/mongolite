@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect x="80" y="150" width="120" height="10" rx="5" fill="url(#accent)"/>
+  <text x="80" y="310" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="150" font-weight="700" fill="#f8fafc">MongoLite</text>
+  <text x="84" y="400" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="46" fill="#cbd5e1">A MongoDB-like client backed by SQLite.</text>
+  <text x="84" y="465" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="36" fill="#94a3b8">No server required.</text>
+  <text x="84" y="570" font-family="Menlo, Courier New, monospace" font-size="30" fill="#34d399">npm i @semics-tech/mongolite</text>
+  <!-- stylised stacked-disc mark -->
+  <g transform="translate(1010 250)" fill="none" stroke="url(#accent)" stroke-width="14">
+    <ellipse cx="0" cy="-70" rx="120" ry="40"/>
+    <path d="M-120 -70 V0 A120 40 0 0 0 120 0 V-70"/>
+    <path d="M-120 0 V70 A120 40 0 0 0 120 70 V0"/>
+  </g>
+</svg>
