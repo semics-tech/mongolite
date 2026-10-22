@@ -62,6 +62,7 @@ export interface SqlJsDatabase {
  */
 export class BrowserSqliteAdapter implements IDatabaseAdapter {
   private readonly db: SqlJsDatabase;
+  readonly supportsTransactions = true;
 
   /**
    * @param db An initialised sql.js `Database` instance.

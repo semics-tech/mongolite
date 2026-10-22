@@ -24,6 +24,7 @@ import {
 import { FindCursor } from './cursors/findCursor.js';
 import { extractRawIndexColumns } from './utils/indexing.js';
 import { ChangeStream, ChangeStreamOptions } from './changeStream.js';
+import type { ClientSession, SessionOptions } from './session.js';
 import { applyProjectionToDocument, resolveProjectionMode } from './utils/projection.js';
 import { evaluateOperators } from './utils/queryOperators.js';
 import {
@@ -213,8 +214,11 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   constructor(
     private db: IDatabaseAdapter,
     public readonly name: string,
-    private readonly options: { verbose?: boolean } = {}
+    private readonly options: { verbose?: boolean } = {},
+    /** @internal Session-bound copies skip the fire-and-forget table creation. */
+    private readonly sessionBound = false
   ) {
+    if (sessionBound) return;
     this.ensureTable().catch((err) => {
       // This error should be handled or logged appropriately.
       // For now, console.error is used. In a real app, a more robust
@@ -222,6 +226,47 @@ export class MongoLiteCollection<T extends DocumentWithId> {
       // the collection initialization or notifying the user.
       console.error(`Failed to ensure table ${this.name} exists:`, err);
     });
+  }
+
+  /**
+   * Returns a copy of this collection bound to the session's transaction, or
+   * `null` when no session was passed.
+   * @private
+   */
+  private scoped(options?: SessionOptions): MongoLiteCollection<T> | null {
+    const session = options?.session;
+    if (!session) return null;
+    if ((session as ClientSession).gated !== this.db) {
+      throw new Error(
+        'The session belongs to a different client, or this collection was not created by client.collection()'
+      );
+    }
+    return new MongoLiteCollection<T>(session.adapter, this.name, this.options, true);
+  }
+
+  /**
+   * Runs `fn` as one atomic unit: its own transaction normally, a savepoint
+   * inside a session transaction.
+   * @private
+   */
+  private async atomic<R>(fn: (db: IDatabaseAdapter) => Promise<R>): Promise<R> {
+    const db = this.db as IDatabaseAdapter & {
+      runAtomic?: (fn: (db: IDatabaseAdapter) => Promise<R>) => Promise<R>;
+    };
+    if (typeof db.runAtomic === 'function') return db.runAtomic(fn);
+    await this.db.exec('BEGIN TRANSACTION');
+    try {
+      const result = await fn(this.db);
+      await this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await this.db.exec('ROLLBACK');
+      } catch (rollbackError) {
+        console.error(`Error during rollback in ${this.name}:`, rollbackError);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -255,7 +300,12 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param doc The document to insert.
    * @returns {Promise<InsertOneResult>} An object containing the outcome of the insert operation.
    */
-  async insertOne(doc: Omit<T, '_id'> & { _id?: string }): Promise<InsertOneResult> {
+  async insertOne(
+    doc: Omit<T, '_id'> & { _id?: string },
+    options?: SessionOptions
+  ): Promise<InsertOneResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.insertOne(doc);
     await this.ensureTable(); // Ensure table exists before insert
     const docId = doc._id || new ObjectId().toString();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -298,7 +348,12 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param docs An array of documents to insert.
    * @returns {Promise<InsertManyResult>} An object containing the outcome of all insert operations.
    * */
-  async insertMany(docs: (Omit<T, '_id'> & { _id?: string })[]): Promise<InsertManyResult> {
+  async insertMany(
+    docs: (Omit<T, '_id'> & { _id?: string })[],
+    options?: SessionOptions
+  ): Promise<InsertManyResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.insertMany(docs);
     await this.ensureTable(); // Ensure table exists before insert
 
     if (docs.length === 0) {
@@ -354,29 +409,17 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     });
 
     const insertBatchOperation = async () => {
-      // Begin transaction
-      await this.db.exec('BEGIN TRANSACTION');
-
       try {
-        const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
-
-        // Use a prepared statement for better performance
-        for (const preparedDoc of preparedDocs) {
-          await this.db.run(sql, [preparedDoc.id, preparedDoc.data]);
-          results.push({ acknowledged: true, insertedId: preparedDoc.id });
-        }
-
-        // Commit the transaction
-        await this.db.exec('COMMIT');
+        // One transaction (a savepoint when inside a session transaction).
+        await this.atomic(async (db) => {
+          const sql = `INSERT INTO "${this.name}" (_id, data) VALUES (?, ?)`;
+          for (const preparedDoc of preparedDocs) {
+            await db.run(sql, [preparedDoc.id, preparedDoc.data]);
+            results.push({ acknowledged: true, insertedId: preparedDoc.id });
+          }
+        });
       } catch (error) {
-        // Rollback on any error
-        try {
-          await this.db.exec('ROLLBACK');
-        } catch (rollbackError) {
-          console.error(`Error during rollback in ${this.name}:`, rollbackError);
-        }
-
-        // Clear results since transaction failed
+        // Clear results since the transaction failed
         results.length = 0;
 
         // Handle specific error types
@@ -418,7 +461,13 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * return type being `T`. This provides better ergonomics for the common case where no
    * projection is used.
    */
-  async findOne(filter: Filter<T>, projection?: Projection<T>): Promise<T | null> {
+  async findOne(
+    filter: Filter<T>,
+    projection?: Projection<T>,
+    options?: SessionOptions
+  ): Promise<T | null> {
+    const bound = this.scoped(options);
+    if (bound) return bound.findOne(filter, projection);
     await this.ensureTable();
     const cursor = this.find(filter).limit(1);
     if (projection) {
@@ -433,7 +482,9 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param filter The query criteria.
    * @returns {FindCursor<T>} A `FindCursor` instance.
    */
-  find(filter: Filter<T> = {}): FindCursor<T> {
+  find(filter: Filter<T> = {}, options?: SessionOptions): FindCursor<T> {
+    const bound = this.scoped(options);
+    if (bound) return bound.find(filter);
     // ensureTable is called by operations on the cursor or by constructor
     return new FindCursor<T>(this.db, this.name, filter, this.options);
   }
@@ -447,8 +498,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async updateOne(
     filter: Filter<T>,
     update: UpdateFilter<T>,
-    options: { upsert?: boolean } = {}
+    options: { upsert?: boolean } & SessionOptions = {}
   ): Promise<UpdateResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.updateOne(filter, update, { ...options, session: undefined });
     await this.ensureTable();
 
     // Find the document first (only one)
@@ -747,7 +800,13 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param update The modifications to apply.
    * @returns {Promise<UpdateResult>} An object describing the outcome.
    */
-  async updateMany(filter: Filter<T>, update: UpdateFilter<T>): Promise<UpdateResult> {
+  async updateMany(
+    filter: Filter<T>,
+    update: UpdateFilter<T>,
+    options?: SessionOptions
+  ): Promise<UpdateResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.updateMany(filter, update);
     await this.ensureTable();
     const paramsForSelect: unknown[] = [];
     const whereClause = new FindCursor<T>(this.db, this.name, filter)['buildGuardedWhereClause'](
@@ -1212,7 +1271,9 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param filter The criteria to select the document to delete.
    * @returns {Promise<DeleteResult>} An object describing the outcome.
    */
-  async deleteOne(filter: Filter<T>): Promise<DeleteResult> {
+  async deleteOne(filter: Filter<T>, options?: SessionOptions): Promise<DeleteResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.deleteOne(filter);
     await this.ensureTable();
 
     const paramsForDelete: unknown[] = [];
@@ -1251,7 +1312,9 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param filter The criteria to select documents to delete.
    * @returns {Promise<DeleteResult>} An object describing the outcome.
    */
-  async deleteMany(filter: Filter<T>): Promise<DeleteResult> {
+  async deleteMany(filter: Filter<T>, options?: SessionOptions): Promise<DeleteResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.deleteMany(filter);
     await this.ensureTable();
 
     const paramsForDelete: unknown[] = [];
@@ -1287,7 +1350,9 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param filter The criteria to select documents to count.
    * @returns {Promise<number>} The count of matching documents.
    */
-  async countDocuments(filter: Filter<T> = {}): Promise<number> {
+  async countDocuments(filter: Filter<T> = {}, options?: SessionOptions): Promise<number> {
+    const bound = this.scoped(options);
+    if (bound) return bound.countDocuments(filter);
     await this.ensureTable();
 
     return this.find(filter).count();
@@ -1335,7 +1400,9 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * This is an estimate and may not reflect the exact count in concurrent environments.
    * @returns {Promise<number>} The estimated count.
    */
-  async estimatedDocumentCount(): Promise<number> {
+  async estimatedDocumentCount(options?: SessionOptions): Promise<number> {
+    const bound = this.scoped(options);
+    if (bound) return bound.estimatedDocumentCount();
     await this.ensureTable();
     const result = await this.db.get<{ count: number }>(
       `SELECT COUNT(*) as count FROM "${this.name}"`
@@ -1353,8 +1420,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async findOneAndUpdate(
     filter: Filter<T>,
     update: UpdateFilter<T>,
-    options: FindOneAndUpdateOptions<T> = {}
+    options: FindOneAndUpdateOptions<T> & SessionOptions = {}
   ): Promise<T | null> {
+    const bound = this.scoped(options);
+    if (bound) return bound.findOneAndUpdate(filter, update, { ...options, session: undefined });
     await this.ensureTable();
     const { returnDocument = 'before', upsert = false, projection } = options;
 
@@ -1410,8 +1479,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    */
   async findOneAndDelete(
     filter: Filter<T>,
-    options: FindOneAndDeleteOptions<T> = {}
+    options: FindOneAndDeleteOptions<T> & SessionOptions = {}
   ): Promise<T | null> {
+    const bound = this.scoped(options);
+    if (bound) return bound.findOneAndDelete(filter, { ...options, session: undefined });
     await this.ensureTable();
     const { projection } = options;
 
@@ -1447,8 +1518,11 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async findOneAndReplace(
     filter: Filter<T>,
     replacement: Omit<T, '_id'>,
-    options: FindOneAndReplaceOptions<T> = {}
+    options: FindOneAndReplaceOptions<T> & SessionOptions = {}
   ): Promise<T | null> {
+    const bound = this.scoped(options);
+    if (bound)
+      return bound.findOneAndReplace(filter, replacement, { ...options, session: undefined });
     await this.ensureTable();
     const { returnDocument = 'before', upsert = false, projection } = options;
 
@@ -1514,8 +1588,10 @@ export class MongoLiteCollection<T extends DocumentWithId> {
   async replaceOne(
     filter: Filter<T>,
     replacement: Omit<T, '_id'>,
-    options: ReplaceOptions = {}
+    options: ReplaceOptions & SessionOptions = {}
   ): Promise<UpdateResult> {
+    const bound = this.scoped(options);
+    if (bound) return bound.replaceOne(filter, replacement, { ...options, session: undefined });
     await this.ensureTable();
     const { upsert = false } = options;
 
@@ -1555,7 +1631,13 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param filter Optional filter to narrow the documents.
    * @returns {Promise<unknown[]>} An array of distinct values.
    */
-  async distinct(field: string, filter: Filter<T> = {}): Promise<unknown[]> {
+  async distinct(
+    field: string,
+    filter: Filter<T> = {},
+    options?: SessionOptions
+  ): Promise<unknown[]> {
+    const bound = this.scoped(options);
+    if (bound) return bound.distinct(field, filter);
     await this.ensureTable();
 
     const docs = await this.find(filter).toArray();
@@ -1590,7 +1672,9 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * Drops the entire collection (table) from the database.
    * @returns {Promise<void>}
    */
-  async drop(): Promise<void> {
+  async drop(options?: SessionOptions): Promise<void> {
+    const bound = this.scoped(options);
+    if (bound) return bound.drop();
     await this.db.exec(`DROP TABLE IF EXISTS "${this.name}"`);
   }
 
@@ -1603,7 +1687,12 @@ export class MongoLiteCollection<T extends DocumentWithId> {
    * @param pipeline An array of pipeline stage documents.
    * @returns An object with a toArray() method that returns the aggregation result.
    */
-  aggregate(pipeline: AggregationPipeline): { toArray: () => Promise<Record<string, unknown>[]> } {
+  aggregate(
+    pipeline: AggregationPipeline,
+    options?: SessionOptions
+  ): { toArray: () => Promise<Record<string, unknown>[]> } {
+    const bound = this.scoped(options);
+    if (bound) return bound.aggregate(pipeline);
     return {
       toArray: async (): Promise<Record<string, unknown>[]> => {
         await this.ensureTable();
@@ -2102,6 +2191,8 @@ export class MongoLiteCollection<T extends DocumentWithId> {
     initialDelayMs = 100,
     maxDelayMs = 10000
   ): Promise<R> {
+    // Inside a session transaction we already hold SQLite's write lock: never retry.
+    if (this.sessionBound) return operation();
     let retryCount = 0;
     let delayMs = initialDelayMs;
 

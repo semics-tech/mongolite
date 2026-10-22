@@ -7,6 +7,7 @@ import {
   buildConnectionKey,
   isShareablePath,
 } from './utils/connection-registry.js';
+import { gateForConnection, type TransactionGate } from './utils/transaction-gate.js';
 
 export { DEFAULT_BUSY_TIMEOUT_MS };
 
@@ -29,6 +30,13 @@ export interface IDatabaseAdapter {
   all<T>(sql: string, params?: unknown[]): Promise<T[]>;
   exec(sql: string): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Set to `true` by adapters that implement `BEGIN IMMEDIATE` / `COMMIT` /
+   * `ROLLBACK` semantics, enabling `client.startSession()`.
+   */
+  readonly supportsTransactions?: boolean;
+  /** Gate serialising transactions on this connection. Created by the client when absent. */
+  readonly transactionGate?: TransactionGate;
 }
 
 export interface MongoLiteOptions {
@@ -68,6 +76,8 @@ export class SQLiteDB implements IDatabaseAdapter {
   private readonly busyTimeout: number;
   private readonly shareKey: string | null;
   private openPromise: Promise<void> | null = null;
+  readonly supportsTransactions = true;
+  readonly transactionGate: TransactionGate;
 
   /**
    * Creates an instance of SQLiteDB.
@@ -104,6 +114,7 @@ export class SQLiteDB implements IDatabaseAdapter {
             verbose: this.verbose,
           })
         : null;
+    this.transactionGate = gateForConnection(this.shareKey);
   }
 
   /**

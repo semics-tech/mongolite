@@ -68,27 +68,37 @@ A common subset is evaluated in `$project`, `$addFields`, `$group`, `$replaceRoo
 
 ## Collection and client API
 
-| Area                                                                                                                                                                     | Status | Notes                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `insertOne`, `insertMany`, `findOne`, `find`, `updateOne`, `updateMany`, `replaceOne`, `deleteOne`, `deleteMany`, `countDocuments`, `estimatedDocumentCount`, `distinct` | ✅     |                                                                                                                        |
-| `findOneAndUpdate`, `findOneAndDelete`, `findOneAndReplace`                                                                                                              | ✅     |                                                                                                                        |
-| `createIndex`, `listIndexes`, `dropIndex`, `dropIndexes`                                                                                                                 | ⚠️     | Indexes are SQLite indexes on JSON paths. `unique` and `name` are supported; `sparse`, partial and TTL indexes are not |
-| `aggregate(...).toArray()`                                                                                                                                               | ⚠️     | Returns a handle with `toArray()` only (no `for await`, `next()` or `explain()`)                                       |
-| `watch()` change streams                                                                                                                                                 | ⚠️     | Local, in-process events only. See [CHANGE_STREAMS.md](./CHANGE_STREAMS.md)                                            |
-| `bulkWrite`, `initializeOrderedBulkOp`                                                                                                                                   | ❌     |                                                                                                                        |
-| Multi-document transactions (`startSession`, `withTransaction`)                                                                                                          | ❌     | Each write is atomic on its own; `insertMany` is one SQLite transaction. See below                                     |
-| Schema validation, collations, capped collections, GridFS, views, Atlas Search                                                                                           | ❌     |                                                                                                                        |
+| Area                                                                                                                                                                     | Status | Notes                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `insertOne`, `insertMany`, `findOne`, `find`, `updateOne`, `updateMany`, `replaceOne`, `deleteOne`, `deleteMany`, `countDocuments`, `estimatedDocumentCount`, `distinct` | ✅     |                                                                                                                                  |
+| `findOneAndUpdate`, `findOneAndDelete`, `findOneAndReplace`                                                                                                              | ✅     |                                                                                                                                  |
+| `createIndex`, `listIndexes`, `dropIndex`, `dropIndexes`                                                                                                                 | ⚠️     | Indexes are SQLite indexes on JSON paths. `unique` and `name` are supported; `sparse`, partial and TTL indexes are not           |
+| `aggregate(...).toArray()`                                                                                                                                               | ⚠️     | Returns a handle with `toArray()` only (no `for await`, `next()` or `explain()`)                                                 |
+| `watch()` change streams                                                                                                                                                 | ⚠️     | Local, in-process events only. See [CHANGE_STREAMS.md](./CHANGE_STREAMS.md)                                                      |
+| `bulkWrite`, `initializeOrderedBulkOp`                                                                                                                                   | ❌     |                                                                                                                                  |
+| Multi-document transactions (`startSession`, `withTransaction`)                                                                                                          | ⚠️     | Supported on the better-sqlite3, `node:sqlite` and sql.js adapters; the Cloudflare adapter throws "not supported yet". See below |
+| Schema validation, collations, capped collections, GridFS, views, Atlas Search                                                                                           | ❌     |                                                                                                                                  |
 
-## Transactions: feasibility note (spike, not implemented)
+## Transactions (partial: Node adapters, not Cloudflare)
 
-Findings from a time-boxed read of the code; nothing here is built.
+```ts
+const session = client.startSession();
+try {
+  await session.withTransaction(async () => {
+    await orders.insertOne({ sku: 'a' }, { session });
+    await stock.updateOne({ sku: 'a' }, { $inc: { qty: -1 } }, { session });
+  });
+} finally {
+  await session.endSession();
+}
+```
 
-- **SQLite can do it.** SQLite supports `BEGIN`/`COMMIT`/`ROLLBACK`, and `insertMany` already uses one. A single connection serialises writers, so isolation is simple (effectively serializable) for one process.
-- **Sketch.** Add `client.startSession()` returning a session with `withTransaction(fn)`. Collection methods would accept `{ session }`; with a session they run on the session's connection inside `BEGIN IMMEDIATE`, and `withTransaction` commits on success and rolls back on throw. Nested calls would use `SAVEPOINT`.
-- **Hard parts.**
-  1. Interleaving: while a transaction is open on the shared connection, un-sessioned writes from other async tasks would land inside it. Needs a per-client async mutex or a second connection per session.
-  2. Change streams and the sync outbox must emit only after `COMMIT` and discard on `ROLLBACK`.
-  3. Adapter differences: `node:sqlite` and better-sqlite3 are synchronous and straightforward. The browser (sql.js) adapter works on an in-memory copy, and Cloudflare Durable Objects expose `transactionSync` / `storage.transaction` rather than raw `BEGIN`, so each adapter needs its own begin/commit/rollback.
-  4. The existing `SQLITE_BUSY` retry wrapper must not retry inside an open transaction.
-- **Rough size.** Node adapters only: a few days including tests. All adapters plus change-stream/outbox correctness: roughly a week or more.
-- **Recommendation.** Not a launch blocker. Keep the docs explicit that there are no multi-document transactions, and consider a minimal `collection`-level `client.transaction(async () => ...)` for the Node adapters first.
+- **Supported:** `client.startSession()`, `client.withSession(fn)`, `session.withTransaction(fn)` (commits when `fn` resolves and returns its value; rolls back and rethrows when it throws), `startTransaction` / `commitTransaction` / `abortTransaction`, `inTransaction()`, `endSession()` (aborts an open transaction). Pass `{ session }` to collection methods to join the transaction. Works on better-sqlite3, `node:sqlite` and sql.js. The Cloudflare adapter throws `MongoLiteTransactionError: Transactions are not supported yet`.
+- **How it works:** `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`, with a per-connection lock. While a transaction is open, operations without that session (including reads, change streams and the sync worker on the same client) wait until it ends, so they can never run inside or be rolled back by someone else's transaction. A wait longer than `transactionLockTimeoutMs` (default 5000, client option) fails with an error instead of hanging. `insertMany` inside a transaction uses a savepoint.
+- **Differences from MongoDB:**
+  - Isolation is serializable with a single writer: a concurrent writer or reader waits for the commit instead of getting a snapshot or a `WriteConflict` error.
+  - A failed operation inside a transaction (for example a duplicate `_id`) aborts the whole transaction, as in MongoDB; later operations on the session throw until a new transaction starts.
+  - `withTransaction` does not retry automatically (SQLite has no `TransientTransactionError`). `BEGIN IMMEDIATE` failing with `SQLITE_BUSY` throws `TransactionBusyError` (`retryable: true`).
+  - `readConcern`, `writeConcern` and `readPreference` options are accepted and ignored. Nested `withTransaction` on one session throws.
+  - Transactions are ACID on one local database file. They are not distributed, and sync to MongoDB pushes documents idempotently rather than as one upstream transaction.
+- **Not covered yet:** automatic retry, multi-process contention tests, and change-stream and sync-outbox behaviour on rollback (both are written by SQLite triggers on the same connection, so they should roll back with the transaction, but there are no tests for it yet).

@@ -156,7 +156,11 @@ Drops the collection (deletes the underlying table).
 
 Runs an aggregation pipeline; call `.toArray()` to get the results. Supported stages: `$match` (including `$expr`), `$project` (including computed fields), `$addFields`/`$set`, `$sort`, `$limit`, `$skip`, `$count`, `$group`, `$unwind` (including `preserveNullAndEmptyArrays` and `includeArrayIndex`), `$replaceRoot`/`$replaceWith`, and `$lookup` (equality form `from`/`localField`/`foreignField`/`as` against another collection in the same database; the `pipeline`/`let` form is not supported). `$group` supports the accumulators `$sum`, `$avg`, `$min`, `$max`, `$push`, `$addToSet`, `$first`, `$last` and `$count`. Expressions support field paths and a common subset of operators (`$add`, `$subtract`, `$multiply`, `$divide`, `$mod`, `$concat`, `$toUpper`, `$toLower`, comparison and boolean operators, `$cond`, `$ifNull`, `$size`, `$arrayElemAt`, `$first`, `$last`, `$literal`). Unknown stages, accumulators or expression operators throw an error rather than being ignored. See [COMPATIBILITY.md](./COMPATIBILITY.md) for the full table.
 
-There is no multi-document transaction API (no sessions, `startTransaction` or `withTransaction`). Each write is atomic on its own, and `insertMany` runs as a single SQLite transaction.
+Each write is atomic on its own, and `insertMany` runs as a single SQLite transaction. For multi-document transactions, see `client.startSession()` below.
+
+### `client.startSession(): ClientSession`
+
+Starts a session (also `client.withSession(fn)`). Use `session.withTransaction(async () => { ... })` and pass `{ session }` as the last option to collection calls (`insertOne`, `insertMany`, `findOne`, `find`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `replaceOne`, `findOneAnd*`, `countDocuments`, `distinct`, `aggregate`, …) that belong in the transaction. Commit on success, rollback on throw. Operations without the session wait until the transaction ends. Supported on better-sqlite3, `node:sqlite` and sql.js; the Cloudflare adapter throws. Details and differences from MongoDB are in [COMPATIBILITY.md](./COMPATIBILITY.md#transactions-partial-node-adapters-not-cloudflare).
 
 ### `watch(options?): ChangeStream<T>`
 
