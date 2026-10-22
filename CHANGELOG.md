@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/semics-tech/mongolite/compare/v1.4.2...v1.5.0) (2026-10-22)
+
+
+### Features
+
+* require Node 24.16+/26.1+ for node:sqlite default, clear error, trademark disclaimer ([#120](https://github.com/semics-tech/mongolite/issues/120)) ([2fa1795](https://github.com/semics-tech/mongolite/commit/2fa1795a0c51fe6eaffbe07bc8f7261bf24c9e8f))
+
 ## [1.4.2](https://github.com/semics-tech/mongolite/compare/v1.4.1...v1.4.2) (2026-10-21)
 
 
