@@ -2,7 +2,7 @@
  * `better-sqlite3`-backed entry point for MongoLite.
  *
  * The main `@semics-tech/mongolite` entry point defaults to `NodeSqliteAdapter`, backed by
- * Node.js's built-in `node:sqlite` module, which requires Node.js 22.5.0+. Import
+ * Node.js's built-in `node:sqlite` module, which needs Node.js 24.16+ (or 26.1+). Import
  * from `@semics-tech/mongolite/better-sqlite3` instead if you need to run on an older
  * Node.js runtime, or you simply prefer the more battle-tested `better-sqlite3`
  * native addon.

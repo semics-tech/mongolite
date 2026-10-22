@@ -36,10 +36,9 @@ A MongoDB-like client backed by SQLite. Use a familiar MongoDB API with the simp
 npm install @semics-tech/mongolite
 ```
 
-Requires **Node.js 22.5.0+** by default — the main entry point is backed by
-Node's built-in `node:sqlite` module, so there's no native addon to install or
-build. On an older Node.js runtime, use the `better-sqlite3`-backed adapter
-instead; see [Native `node:sqlite` vs. `better-sqlite3`](#native-nodesqlite-vs-better-sqlite3) below.
+The default driver is Node's built-in `node:sqlite` (needs **Node.js 24.16+ or 26.1+**), so there's no native addon to install or
+build. On older Node.js, or if you'd rather use a native driver, import
+`@semics-tech/mongolite/better-sqlite3` instead; see [Native `node:sqlite` vs. `better-sqlite3`](#native-nodesqlite-vs-better-sqlite3) below.
 
 Ships both ESM (`import`) and CommonJS (`require`) builds — use whichever your project already uses.
 
@@ -177,10 +176,10 @@ await users.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
 
-### `better-sqlite3` (optional, for Node.js <22.5 or Bun)
+### `better-sqlite3` (optional, for Node.js <24.16 or Bun)
 
 The default backend above uses Node's built-in `node:sqlite` module, which
-requires Node.js 22.5.0+. If you're on an older Node.js runtime, or you
+needs Node.js 24.16+ or 26.1+. If you're on an older Node.js runtime, or you
 simply prefer the more battle-tested native addon, import from the
 `@semics-tech/mongolite/better-sqlite3` entry point instead. `better-sqlite3` is an
 **optional dependency** — install it yourself if it wasn't already pulled in:
@@ -204,7 +203,7 @@ await client.close();
 > **Which one should I use?** `node:sqlite` (the default) is still marked
 > experimental upstream but requires no native build step, which is why it's
 > the default here. `better-sqlite3` is the older, more battle-tested native
-> addon — reach for it if you're stuck on Node.js <22.5, targeting Bun without
+> addon — reach for it if you're stuck on Node.js <24.16, targeting Bun without
 > a `node:sqlite` polyfill, or want to avoid depending on an experimental
 > Node.js API in production. Both implement the same `IDatabaseAdapter`
 > interface, so switching between them is a one-line import change.
@@ -328,3 +327,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) befo
 ## License
 
 [MIT](./LICENSE)
+
+---
+
+MongoLite is an independent project, not affiliated with or endorsed by MongoDB, Inc. MongoDB is a trademark of MongoDB, Inc.

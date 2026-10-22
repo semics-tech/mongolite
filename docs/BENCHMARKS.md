@@ -20,7 +20,7 @@ npm ci
 npm run benchmark        # ~20 s; also writes scripts/benchmark-results.md (git-ignored)
 ```
 
-Use Node 22.5+ (the repo's minimum) so the built-in `node:sqlite` adapter is the one measured. Expect the absolute numbers to move with your hardware. A second full run on the same machine on 2026-10-20 reproduced every row within about 10%, except `INSERT_INDIVIDUAL` (8,099 ops/s versus 10,933 above) and `UPDATE` (1,865 versus 1,993 ops/s), which are dominated by per-statement commit cost and vary the most. Treat single-run figures as indicative, not as guarantees.
+Use Node 24.16+ (the repo's minimum) so the built-in `node:sqlite` adapter is the one measured. Expect the absolute numbers to move with your hardware. A second full run on the same machine on 2026-10-20 reproduced every row within about 10%, except `INSERT_INDIVIDUAL` (8,099 ops/s versus 10,933 above) and `UPDATE` (1,865 versus 1,993 ops/s), which are dominated by per-statement commit cost and vary the most. Treat single-run figures as indicative, not as guarantees.
 
 ## Operation Performance
 

@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import type { IDatabaseAdapter, MongoLiteOptions } from '../db.js';
 import {
@@ -7,6 +7,27 @@ import {
   buildConnectionKey,
   isShareablePath,
 } from '../utils/connection-registry.js';
+
+/** Oldest Node.js releases where `node:sqlite` is safe to use (see README). */
+const NODE_SQLITE_REQUIREMENT = 'Node.js 24.16+ (or 26.1+)';
+
+/**
+ * Loads `node:sqlite` lazily so that a runtime without it gets an actionable
+ * error from `connect()` instead of a bare `ERR_UNKNOWN_BUILTIN_MODULE` at import.
+ */
+async function loadDatabaseSync(): Promise<typeof DatabaseSync> {
+  try {
+    return (await import('node:sqlite')).DatabaseSync;
+  } catch (err) {
+    throw new Error(
+      `MongoLite's default driver uses the built-in "node:sqlite" module, which needs ` +
+        `${NODE_SQLITE_REQUIREMENT}; this runtime (${process.version}) can't load it. ` +
+        `Upgrade Node.js, or use the better-sqlite3 driver instead: ` +
+        `import { MongoLite } from '@semics-tech/mongolite/better-sqlite3' ` +
+        `(and \`npm install better-sqlite3\`). Original error: ${(err as Error).message}`
+    );
+  }
+}
 
 /** Shared `node:sqlite` handles for this process, keyed by connection identity. */
 const sharedConnections = new ConnectionRegistry<DatabaseSync>();
@@ -21,7 +42,7 @@ type SqlBindValue = string | number | bigint | null | NodeJS.ArrayBufferView;
 
 /**
  * Database adapter backed by Node.js's built-in `node:sqlite` module — no native
- * addon, no prebuilt binary, no `node-gyp`. Requires Node.js 22.5.0+ (the module
+ * addon, no prebuilt binary, no `node-gyp`. Requires Node.js 24.16+ or 26.1+ (the module
  * is marked experimental by Node.js until it graduates to stable).
  *
  * ## Usage
@@ -40,8 +61,9 @@ type SqlBindValue = string | number | bigint | null | NodeJS.ArrayBufferView;
  *
  * - **Experimental.** `node:sqlite` is still marked experimental upstream and its
  *   API may change between Node.js minor versions.
- * - **Node.js 22.5.0+ only.** Importing this adapter on an older runtime (or on
- *   Bun/Deno without a `node:sqlite` polyfill) throws at import time.
+ * - **Node.js 24.16+ / 26.1+ only.** On an older runtime (or on Bun/Deno without a
+ *   `node:sqlite` polyfill) `connect()` rejects with an error pointing at the
+ *   `better-sqlite3` entry point.
  * - Rows are returned with a `null` prototype (per `node:sqlite`'s API). Plain
  *   property access (`row.foo`) and `JSON.stringify`/`Object.keys` all work as
  *   expected; `row.hasOwnProperty(...)` does not.
@@ -97,81 +119,91 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
    * Opens the database connection if it's not already open.
    */
   public async connect(): Promise<void> {
-    if (this.db && this.openPromise) {
+    if (this.openPromise) {
       return this.openPromise;
     }
     if (this.db) {
       return Promise.resolve();
     }
 
-    this.openPromise = new Promise((resolve, reject) => {
-      try {
-        // Only runs on a genuinely new connection — when sharing, an existing
-        // handle already has its pragmas and UDFs applied.
-        const openConnection = (): DatabaseSync => {
-          const db = new DatabaseSync(this.filePath, { readOnly: this.readOnly });
+    this.openPromise = loadDatabaseSync()
+      .then(
+        (DatabaseSync) =>
+          new Promise<void>((resolve, reject) => {
+            try {
+              // Only runs on a genuinely new connection — when sharing, an existing
+              // handle already has its pragmas and UDFs applied.
+              const openConnection = (): DatabaseSync => {
+                const db = new DatabaseSync(this.filePath, { readOnly: this.readOnly });
 
-          if (this.WAL && !this.readOnly) {
-            db.exec('PRAGMA journal_mode = WAL');
-          }
+                if (this.WAL && !this.readOnly) {
+                  db.exec('PRAGMA journal_mode = WAL');
+                }
 
-          // Wait rather than immediately throwing SQLITE_BUSY when another
-          // connection (often another process) holds a lock.
-          if (this.busyTimeout > 0) {
-            db.exec(`PRAGMA busy_timeout = ${this.busyTimeout}`);
-          }
+                // Wait rather than immediately throwing SQLITE_BUSY when another
+                // connection (often another process) holds a lock.
+                if (this.busyTimeout > 0) {
+                  db.exec(`PRAGMA busy_timeout = ${this.busyTimeout}`);
+                }
 
-          // Register regexp UDF for $regex operator support.
-          // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
-          // not validated for catastrophic backtracking (ReDoS) could block the event loop.
-          // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
-          db.function(
-            'regexp',
-            { deterministic: true },
-            (pattern: unknown, value: unknown): number => {
-              if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
-              try {
-                return new RegExp(pattern).test(String(value)) ? 1 : 0;
-              } catch {
-                return 0;
-              }
+                // Register regexp UDF for $regex operator support.
+                // WARNING: Patterns are compiled via JavaScript RegExp. User-supplied patterns that are
+                // not validated for catastrophic backtracking (ReDoS) could block the event loop.
+                // Avoid using untrusted/unvalidated patterns with $regex in security-sensitive contexts.
+                db.function(
+                  'regexp',
+                  { deterministic: true },
+                  (pattern: unknown, value: unknown): number => {
+                    if (typeof pattern !== 'string' || value === null || value === undefined)
+                      return 0;
+                    try {
+                      return new RegExp(pattern).test(String(value)) ? 1 : 0;
+                    } catch {
+                      return 0;
+                    }
+                  }
+                );
+
+                // Register regexp_flags UDF for $regex with $options support
+                db.function(
+                  'regexp_flags',
+                  { deterministic: true },
+                  (pattern: unknown, flags: unknown, value: unknown): number => {
+                    if (typeof pattern !== 'string' || value === null || value === undefined)
+                      return 0;
+                    try {
+                      const f = typeof flags === 'string' ? flags : '';
+                      return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
+                    } catch {
+                      return 0;
+                    }
+                  }
+                );
+
+                if (this.verbose) {
+                  console.log(`SQLite database opened (node:sqlite): ${this.filePath}`);
+                }
+
+                return db;
+              };
+
+              this.db = this.shareKey
+                ? sharedConnections.acquire(this.shareKey, openConnection)
+                : openConnection();
+
+              resolve();
+            } catch (err) {
+              console.error(`Error opening database ${this.filePath}:`, (err as Error).message);
+              this.db = null;
+              this.openPromise = null;
+              reject(err);
             }
-          );
-
-          // Register regexp_flags UDF for $regex with $options support
-          db.function(
-            'regexp_flags',
-            { deterministic: true },
-            (pattern: unknown, flags: unknown, value: unknown): number => {
-              if (typeof pattern !== 'string' || value === null || value === undefined) return 0;
-              try {
-                const f = typeof flags === 'string' ? flags : '';
-                return new RegExp(pattern, f).test(String(value)) ? 1 : 0;
-              } catch {
-                return 0;
-              }
-            }
-          );
-
-          if (this.verbose) {
-            console.log(`SQLite database opened (node:sqlite): ${this.filePath}`);
-          }
-
-          return db;
-        };
-
-        this.db = this.shareKey
-          ? sharedConnections.acquire(this.shareKey, openConnection)
-          : openConnection();
-
-        resolve();
-      } catch (err) {
-        console.error(`Error opening database ${this.filePath}:`, (err as Error).message);
-        this.db = null;
+          })
+      )
+      .catch((err) => {
         this.openPromise = null;
-        reject(err);
-      }
-    });
+        throw err;
+      });
 
     return this.openPromise;
   }

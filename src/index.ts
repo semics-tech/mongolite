@@ -81,7 +81,7 @@ export interface HttpSyncOptions
  *
  * You can construct it with:
  * - A file path string — uses the built-in `node:sqlite` adapter (`NodeSqliteAdapter`).
- *   Requires Node.js 22.5.0+; for older runtimes, import `MongoLite` from
+ *   Requires Node.js 24.16+ (or 26.1+); for older runtimes, import `MongoLite` from
  *   `@semics-tech/mongolite/better-sqlite3` instead.
  * - A `MongoLiteClientOptions` object — uses the built-in adapter with options.
  * - An `IDatabaseAdapter` instance — use a custom adapter such as
