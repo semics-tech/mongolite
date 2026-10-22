@@ -7,6 +7,7 @@ import {
   buildConnectionKey,
   isShareablePath,
 } from '../utils/connection-registry.js';
+import { gateForConnection, type TransactionGate } from '../utils/transaction-gate.js';
 
 /** Shared `node:sqlite` handles for this process, keyed by connection identity. */
 const sharedConnections = new ConnectionRegistry<DatabaseSync>();
@@ -55,6 +56,8 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
   private readonly busyTimeout: number;
   private readonly shareKey: string | null;
   private openPromise: Promise<void> | null = null;
+  readonly supportsTransactions = true;
+  readonly transactionGate: TransactionGate;
 
   /**
    * @param dbPathOrOptions Path to the SQLite database file (use `':memory:'`
@@ -91,6 +94,7 @@ export class NodeSqliteAdapter implements IDatabaseAdapter {
             verbose: this.verbose,
           })
         : null;
+    this.transactionGate = gateForConnection(this.shareKey);
   }
 
   /**

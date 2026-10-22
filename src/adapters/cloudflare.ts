@@ -71,6 +71,8 @@ export interface SqlStorage {
  *   `setInterval`, which is supported in the Workers runtime.
  */
 export class CloudflareDurableObjectAdapter implements IDatabaseAdapter {
+  /** Durable Objects use `transactionSync` rather than raw `BEGIN`; not supported yet. */
+  readonly supportsTransactions = false;
   private readonly sql: SqlStorage;
 
   /**

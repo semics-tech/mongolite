@@ -13,11 +13,26 @@ import { MongoLiteCollection } from './collection.js';
 import { DocumentWithId } from './types.js';
 import { SyncReplicator } from './sync/replicator.js';
 import type { SyncOptions, SyncSink } from './sync/types.js';
+import { ClientSession } from './session.js';
+import {
+  GatedAdapter,
+  MongoLiteTransactionError,
+  TransactionGate,
+} from './utils/transaction-gate.js';
+
+export { ClientSession } from './session.js';
+export type { SessionOptions, TransactionOptions } from './session.js';
+export { MongoLiteTransactionError, TransactionBusyError } from './utils/transaction-gate.js';
 
 export type { IDatabaseAdapter };
 
 export type MongoLiteBaseOptions = {
   verbose?: boolean;
+  /**
+   * How long (ms) an operation waits for another transaction on the same
+   * connection to finish before failing. Defaults to 5000; `0` waits forever.
+   */
+  transactionLockTimeoutMs?: number;
 };
 
 /**
@@ -31,10 +46,44 @@ export type MongoLiteBaseOptions = {
 export class MongoLite {
   protected db: IDatabaseAdapter;
   protected options: MongoLiteBaseOptions;
+  private readonly gated: GatedAdapter;
+  private readonly sessions = new Set<ClientSession>();
 
   constructor(adapter: IDatabaseAdapter, options: MongoLiteBaseOptions = {}) {
     this.db = adapter;
     this.options = options;
+    const gate = adapter.transactionGate ?? new TransactionGate();
+    if (options.transactionLockTimeoutMs !== undefined) {
+      gate.lockTimeoutMs = options.transactionLockTimeoutMs;
+    }
+    this.gated = new GatedAdapter(adapter, gate);
+  }
+
+  /**
+   * Starts a session for multi-document transactions, like the MongoDB driver's
+   * `client.startSession()`. Supported on the better-sqlite3, `node:sqlite` and
+   * sql.js adapters; the Cloudflare adapter throws.
+   */
+  startSession(): ClientSession {
+    if (!this.db.supportsTransactions) {
+      throw new MongoLiteTransactionError(
+        'Transactions are not supported yet on this adapter (Cloudflare Durable Objects and ' +
+          'custom adapters). Use the better-sqlite3, node:sqlite or sql.js adapters.'
+      );
+    }
+    const session = new ClientSession(this.gated, (s) => this.sessions.delete(s));
+    this.sessions.add(session);
+    return session;
+  }
+
+  /** Runs `fn` with a fresh session and always ends it. */
+  async withSession<R>(fn: (session: ClientSession) => Promise<R>): Promise<R> {
+    const session = this.startSession();
+    try {
+      return await fn(session);
+    } finally {
+      await session.endSession();
+    }
   }
 
   /**
@@ -57,6 +106,8 @@ export class MongoLite {
    * For most custom adapters (e.g. Cloudflare) this is a no-op.
    */
   async close(): Promise<void> {
+    // Abort open transactions first so the lock is released and nothing is left half-written.
+    await Promise.all([...this.sessions].map((s) => s.endSession()));
     return this.db.close();
   }
 
@@ -89,7 +140,7 @@ export class MongoLite {
    * The returned replicator is **not** started; call `start()` on it.
    */
   createSync(sink: SyncSink, options: SyncOptions = {}): SyncReplicator {
-    return new SyncReplicator(this.db, sink, { verbose: this.options.verbose, ...options });
+    return new SyncReplicator(this.gated, sink, { verbose: this.options.verbose, ...options });
   }
 
   /**
@@ -97,6 +148,6 @@ export class MongoLite {
    * @param name The collection (table) name.
    */
   collection<T extends DocumentWithId = DocumentWithId>(name: string): MongoLiteCollection<T> {
-    return new MongoLiteCollection<T>(this.db, name, this.options);
+    return new MongoLiteCollection<T>(this.gated, name, this.options);
   }
 }
