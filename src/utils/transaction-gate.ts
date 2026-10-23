@@ -14,14 +14,41 @@ export class MongoLiteTransactionError extends Error {
   }
 }
 
-/** Thrown when `BEGIN IMMEDIATE` could not take SQLite's write lock (`SQLITE_BUSY`). */
+/**
+ * Thrown when SQLite reports `SQLITE_BUSY` or `SQLITE_LOCKED` (another connection holds
+ * the write lock for longer than `busy_timeout`). Carries the driver's
+ * `TransientTransactionError` label; `withTransaction({ maxRetries })` retries on it.
+ * Experimental.
+ */
 export class TransactionBusyError extends MongoLiteTransactionError {
   /** The caller may retry the whole transaction. */
   readonly retryable = true;
+  readonly code = 'SQLITE_BUSY';
+  readonly errorLabels: string[] = ['TransientTransactionError'];
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = 'TransactionBusyError';
   }
+
+  hasErrorLabel(label: string): boolean {
+    return this.errorLabels.includes(label);
+  }
+}
+
+/**
+ * True when a driver error means "database is busy/locked", across better-sqlite3
+ * (`code: 'SQLITE_BUSY'`), node:sqlite (`errcode` 5/6, message "database is locked")
+ * and sql.js (message only).
+ */
+export function isBusyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { code?: unknown; errcode?: unknown; message?: unknown };
+  if (typeof e.code === 'string' && /^SQLITE_(BUSY|LOCKED)/.test(e.code)) return true;
+  if (e.errcode === 5 || e.errcode === 6) return true;
+  return (
+    typeof e.message === 'string' &&
+    /database (table )?is locked|SQLITE_BUSY|SQLITE_LOCKED/i.test(e.message)
+  );
 }
 
 interface Waiter {

@@ -4,6 +4,7 @@ import {
   GatedAdapter,
   MongoLiteTransactionError,
   TransactionBusyError,
+  isBusyError,
 } from './utils/transaction-gate.js';
 
 /** Accepted for driver compatibility and ignored: SQLite has no read/write concern. */
@@ -12,6 +13,21 @@ export interface TransactionOptions {
   writeConcern?: unknown;
   readPreference?: unknown;
 }
+
+/** Options for {@link ClientSession.withTransaction}. The retry options are experimental. */
+export interface WithTransactionOptions extends TransactionOptions {
+  /**
+   * Retry the whole callback after a transient `SQLITE_BUSY`/`SQLITE_LOCKED`
+   * ({@link TransactionBusyError}), up to this many times (0 to 10). Default 0: no retry.
+   * The callback is re-run from scratch, so it must be safe to run more than once.
+   */
+  maxRetries?: number;
+  /** Base delay in ms before a retry; doubles each attempt with jitter, capped at 500. Default 20. */
+  retryDelayMs?: number;
+}
+
+const MAX_RETRIES_LIMIT = 10;
+const MAX_RETRY_DELAY_MS = 500;
 
 /** Options accepted by collection methods that can join a transaction. */
 export interface SessionOptions {
@@ -35,6 +51,7 @@ export class ClientSession {
   private release: (() => void) | null = null;
   private beginPromise: Promise<void> | null = null;
   private savepointCounter = 0;
+  private readonly busyErrors = new WeakSet<object>();
   /** @internal */
   readonly adapter: SessionAdapter;
 
@@ -79,18 +96,26 @@ export class ClientSession {
         } catch (error) {
           release();
           this.state = 'aborted';
-          if ((error as { code?: string }).code === 'SQLITE_BUSY') {
-            throw new TransactionBusyError('Could not start transaction: database is busy', {
-              cause: error,
-            });
-          }
-          throw error;
+          this.beginPromise = null;
+          throw this.mapBusy(error, 'Could not start transaction: database is busy');
         }
         this.release = release;
         this.state = 'active';
       })();
     }
     return this.beginPromise;
+  }
+
+  /** Converts SQLITE_BUSY/LOCKED into a labelled TransactionBusyError; other errors pass through. @internal */
+  mapBusy(error: unknown, message: string): unknown {
+    if (error instanceof TransactionBusyError) {
+      this.busyErrors.add(error);
+      return error;
+    }
+    if (!isBusyError(error)) return error;
+    const busy = new TransactionBusyError(message, { cause: error });
+    this.busyErrors.add(busy);
+    return busy;
   }
 
   private finish(next: SessionState): void {
@@ -164,6 +189,8 @@ export class ClientSession {
         // best effort
       }
       this.finish('aborted');
+      const busy = this.mapBusy(error, 'Transaction commit failed: database is busy');
+      if (busy !== error) throw busy;
       throw new MongoLiteTransactionError('Transaction commit failed; it was rolled back', {
         cause: error,
       });
@@ -200,10 +227,40 @@ export class ClientSession {
 
   /**
    * Runs `fn` in a transaction: commits when it resolves (returning its value),
-   * rolls back and rethrows when it throws. Unlike the driver this does not
-   * retry automatically; SQLite has no `TransientTransactionError`.
+   * rolls back and rethrows when it throws.
+   *
+   * By default this does not retry. With `maxRetries` (experimental) a transient
+   * `SQLITE_BUSY`/`SQLITE_LOCKED` ({@link TransactionBusyError}) rolls back, waits
+   * (exponential backoff with jitter) and re-runs `fn` from scratch. Errors thrown
+   * by `fn` itself and non-busy commit errors are never retried.
    */
   async withTransaction<R>(
+    fn: (session: ClientSession) => Promise<R>,
+    options?: WithTransactionOptions
+  ): Promise<R> {
+    const maxRetries = options?.maxRetries ?? 0;
+    const baseDelay = options?.retryDelayMs ?? 20;
+    if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > MAX_RETRIES_LIMIT) {
+      throw new MongoLiteTransactionError(
+        `maxRetries must be an integer from 0 to ${MAX_RETRIES_LIMIT}`
+      );
+    }
+    if (!Number.isFinite(baseDelay) || baseDelay < 0) {
+      throw new MongoLiteTransactionError('retryDelayMs must be a non-negative number');
+    }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.runTransactionOnce(fn, options);
+      } catch (error) {
+        const transient = error instanceof TransactionBusyError && this.busyErrors.has(error);
+        if (!transient || attempt >= maxRetries || this.ended) throw error;
+        const ceiling = Math.min(MAX_RETRY_DELAY_MS, baseDelay * 2 ** attempt);
+        await new Promise((r) => setTimeout(r, ceiling / 2 + Math.random() * (ceiling / 2)));
+      }
+    }
+  }
+
+  private async runTransactionOnce<R>(
     fn: (session: ClientSession) => Promise<R>,
     options?: TransactionOptions
   ): Promise<R> {
@@ -251,7 +308,7 @@ class SessionAdapter implements IDatabaseAdapter {
       return await fn(target);
     } catch (error) {
       if (target === this.session.gated.raw) await this.session.failedInTransaction();
-      throw error;
+      throw this.session.mapBusy(error, 'Database is busy');
     }
   }
 

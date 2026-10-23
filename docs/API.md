@@ -162,6 +162,28 @@ Each write is atomic on its own, and `insertMany` runs as a single SQLite transa
 
 Starts a session (also `client.withSession(fn)`). Use `session.withTransaction(async () => { ... })` and pass `{ session }` as the last option to collection calls (`insertOne`, `insertMany`, `findOne`, `find`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `replaceOne`, `findOneAnd*`, `countDocuments`, `distinct`, `aggregate`, …) that belong in the transaction. Commit on success, rollback on throw. Operations without the session wait until the transaction ends. Supported on better-sqlite3, `node:sqlite` and sql.js; the Cloudflare adapter throws. Details and differences from MongoDB are in [COMPATIBILITY.md](./COMPATIBILITY.md#transactions-partial-node-adapters-not-cloudflare).
 
+### `session.withTransaction(fn, options?)` retry (experimental)
+
+```ts
+await session.withTransaction(
+  async () => {
+    await orders.insertOne({ sku: 'a' }, { session });
+  },
+  { maxRetries: 3, retryDelayMs: 20 }
+);
+```
+
+| Option         | Default | Meaning                                                                                                        |
+| -------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `maxRetries`   | `0`     | Retries after a transient `SQLITE_BUSY`/`SQLITE_LOCKED` (0 to 10). `0` keeps the old single-attempt behaviour. |
+| `retryDelayMs` | `20`    | Base delay; doubles each attempt with jitter, capped at 500 ms.                                                |
+
+`readConcern`, `writeConcern` and `readPreference` are still accepted and ignored.
+
+When another connection or process holds the write lock for longer than `busyTimeout`, `BEGIN IMMEDIATE` (or a statement) fails with `TransactionBusyError` (`code: 'SQLITE_BUSY'`, `errorLabels: ['TransientTransactionError']`, `hasErrorLabel(label)`), on node:sqlite, better-sqlite3 and sql.js. With `maxRetries` set, `withTransaction` rolls back, waits, and runs the callback again from scratch; after the limit it throws the last `TransactionBusyError`.
+
+> **Warning:** the callback may run more than once. It must be safe to re-run: no non-database side effects (emails, HTTP calls, counters) unless they are idempotent. Errors thrown by the callback itself, and commit errors other than busy, are never retried. `startTransaction()` is not retried; check `err.hasErrorLabel('TransientTransactionError')` and retry yourself. The Cloudflare adapter still throws "not supported yet".
+
 ### `watch(options?): ChangeStream<T>`
 
 Opens a change stream to watch for changes on this collection.
