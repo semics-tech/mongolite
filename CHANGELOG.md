@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/semics-tech/mongolite/compare/v1.5.0...v1.6.0) (2026-10-26)
+
+
+### Features
+
+* **transactions:** opt-in retry for withTransaction (experimental) ([#122](https://github.com/semics-tech/mongolite/issues/122)) ([6abdb8b](https://github.com/semics-tech/mongolite/commit/6abdb8b0c66b9eaf2aa0878fb58c08ddbfbb9314))
+
 # [1.5.0](https://github.com/semics-tech/mongolite/compare/v1.4.2...v1.5.0) (2026-10-22)
 
 
