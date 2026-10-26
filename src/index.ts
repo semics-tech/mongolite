@@ -6,7 +6,7 @@ export { MongoLiteCollection } from './collection.js';
 export * from './types.js';
 export { ChangeStream } from './changeStream.js';
 export { ClientSession } from './session.js';
-export type { SessionOptions, TransactionOptions } from './session.js';
+export type { SessionOptions, TransactionOptions, WithTransactionOptions } from './session.js';
 export { MongoLiteTransactionError, TransactionBusyError } from './utils/transaction-gate.js';
 export type {
   ChangeStreamDocument,

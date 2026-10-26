@@ -124,7 +124,7 @@ raw SQL are a menu item away when you want them. See [the CLI docs](./docs/CLI.m
 | TypeScript, strict mode                             | ✅          | ✅                       | ✅                   | ⚠️ (community types)        | ⚠️ (community types)        | ✅      |
 | Actively maintained                                 | ✅          | ✅                       | ✅                   | ⚠️ (little recent activity) | ⚠️ (varies; check the repo) | ✅      |
 
-_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has partial multi-document transaction support (`session.withTransaction` on the Node and sql.js adapters; not Cloudflare yet; see [compatibility](./docs/COMPATIBILITY.md))._
+_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has partial multi-document transaction support (`session.withTransaction` on the Node and sql.js adapters; not Cloudflare yet; see [compatibility](./docs/COMPATIBILITY.md)); an experimental opt-in retry for busy writers is available via `withTransaction(fn, { maxRetries })`._
 
 MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
 
