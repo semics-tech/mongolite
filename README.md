@@ -71,6 +71,46 @@ async function main() {
 main();
 ```
 
+### Transactions
+
+Multi-document transactions work on the Node (`node:sqlite`, `better-sqlite3`) and sql.js adapters; the Cloudflare adapter throws.
+Pass `{ session }` to every call that belongs in the transaction. It commits when the callback resolves and rolls back if it throws.
+
+```typescript
+const session = client.startSession();
+try {
+  await session.withTransaction(async () => {
+    await orders.insertOne({ sku: 'a' }, { session });
+    await stock.updateOne({ sku: 'a' }, { $inc: { qty: -1 } }, { session });
+  });
+} finally {
+  await session.endSession();
+}
+```
+
+SQLite allows one writer at a time, so isolation is serializable. `withTransaction` does not retry by default. Pass `{ maxRetries }` (experimental, default 0, max 10) to re-run the callback when SQLite reports a busy writer (`TransactionBusyError`), so the callback must be safe to re-run:
+
+```typescript
+await session.withTransaction(
+  async () => {
+    /* ... */
+  },
+  { maxRetries: 3 }
+);
+```
+
+See [compatibility](./docs/COMPATIBILITY.md#transactions-partial-node-adapters-not-cloudflare) for the differences from MongoDB.
+
+### Benchmarks
+
+```bash
+git clone https://github.com/semics-tech/mongolite && cd mongolite
+npm ci
+npm run benchmark   # runs scripts/benchmark.ts, ~20 s
+```
+
+The published numbers come from an Apple M1 (8 cores, 8 GB RAM, local SSD) on Node.js 24.21 with the built-in `node:sqlite` driver, 10,000 documents, one run. Expect yours to differ; method and caveats are in [Benchmarks](./docs/BENCHMARKS.md).
+
 ## Explore a database from the terminal
 
 ```bash
