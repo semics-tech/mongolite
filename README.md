@@ -88,7 +88,17 @@ try {
 }
 ```
 
-SQLite allows one writer at a time, so isolation is serializable and `withTransaction` does not retry automatically.
+SQLite allows one writer at a time, so isolation is serializable. `withTransaction` does not retry by default. Pass `{ maxRetries }` (experimental, default 0, max 10) to re-run the callback when SQLite reports a busy writer (`TransactionBusyError`), so the callback must be safe to re-run:
+
+```typescript
+await session.withTransaction(
+  async () => {
+    /* ... */
+  },
+  { maxRetries: 3 }
+);
+```
+
 See [compatibility](./docs/COMPATIBILITY.md#transactions-partial-node-adapters-not-cloudflare) for the differences from MongoDB.
 
 ### Benchmarks
