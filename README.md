@@ -240,12 +240,13 @@ await client.close();
 
 <a id="native-nodesqlite-vs-better-sqlite3"></a>
 
-> **Which one should I use?** `node:sqlite` (the default) is still marked
-> experimental upstream but requires no native build step, which is why it's
-> the default here. `better-sqlite3` is the older, more battle-tested native
+> **Which one should I use?** `node:sqlite` (the default) is not yet stable
+> upstream: Node.js still labels it Stability 1.2 (release candidate), though
+> it requires no native build step, which is why it's the default here.
+> `better-sqlite3` is the older, more battle-tested native
 > addon — reach for it if you're stuck on Node.js <24.16, targeting Bun without
-> a `node:sqlite` polyfill, or want to avoid depending on an experimental
-> Node.js API in production. Both implement the same `IDatabaseAdapter`
+> a `node:sqlite` polyfill, or want to avoid depending on a Node.js API that is
+> still a release candidate in production. Both implement the same `IDatabaseAdapter`
 > interface, so switching between them is a one-line import change.
 
 ### Browser (via sql.js)
