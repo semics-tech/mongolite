@@ -116,8 +116,12 @@ replacement. Only appropriate when nothing else writes to the upstream.
 
 ### Why field-level diffs
 
-Pushes carry `$set`/`$unset` of only what changed, computed against a **shadow copy** of
-the last-known server document held locally.
+Pushes to a document that has been seen upstream carry `$set`/`$unset` of only what
+changed, computed against a **shadow copy** of the last-known server document held
+locally. The capture side is whole-document: the outbox row stores the full document
+(`full_document`, copied by the trigger), and the diff is computed from that row at push
+time. Two cases send the whole document instead: the first push of a document with no
+shadow yet (an upsert via `$setOnInsert`), and `versioning: false` (a `replaceOne`).
 
 This is not an optimisation — it is what keeps the upstream intact. MongoLite stores
 documents as plain JSON, so a `Date` becomes an ISO string, an `ObjectId` becomes hex,
@@ -585,8 +589,10 @@ operations, not bookkeeping.
   detected.
 - **Arrays are replaced whole**, never diffed positionally.
 - **The shadow doubles local storage** for replicated documents.
-- **Document-level granularity.** Whole documents are replicated, not field
-  deltas. Very large documents cost proportionally more bandwidth.
+- **Whole-document capture.** The outbox stores each changed document in full, and
+  the first push of a document (before a shadow exists) sends it whole. Later pushes
+  are field-level diffs. Very large documents cost proportionally more on their first
+  push and in the local outbox.
 - **Deletes need triggers installed.** A document deleted while its collection
   had no capture triggers is not replicated. Triggers stay installed once
   created, so this only affects the window before the first `start()` — which
