@@ -109,7 +109,7 @@ npm ci
 npm run benchmark   # runs scripts/benchmark.ts, ~20 s
 ```
 
-The published numbers come from an Apple M1 (8 cores, 8 GB RAM, local SSD) on Node.js 24.21 with the built-in `node:sqlite` driver, 10,000 documents, one run. Expect yours to differ; method and caveats are in [Benchmarks](./docs/BENCHMARKS.md).
+The published numbers are mongolite 1.6.0, run on 2026-10-29 in a Linux arm64 container (2 vCPUs of an Apple-silicon host, 4 GB RAM) on Node.js 24.22 with the built-in `node:sqlite` driver, 10,000 documents, one run. Expect yours to differ; method and caveats are in [Benchmarks](./docs/BENCHMARKS.md).
 
 ## Explore a database from the terminal
 
