@@ -55,7 +55,7 @@ jobs:
         run: npm test
 
       - name: Create release tag and changelog
-        uses: cycjimmy/semantic-release-action@v6
+        uses: cycjimmy/semantic-release-action@v8
         with:
           extra_plugins: |
             @semantic-release/changelog@6
