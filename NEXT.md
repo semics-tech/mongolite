@@ -5,7 +5,6 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Now
 
 ## Next
-- Confirm the first Release run on semantic-release-action v8 passed (run 41528237997); revert #125 if not.
 - Remove stray root files `scratch.ts`, `test-projection.ts` and the stale `PROJECT.md` (an old mongolite-ts package.json) once confirmed unused.
 
 ## Monitor
@@ -25,6 +24,6 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
-- 2026-11-02: merged Dependabot #133, #131, #125
+- 2026-11-02: merged Dependabot #133, #131, #125 (Release ran green on semantic-release-action v8)
 - 2026-11-02: reviewed #125 breaking changes (verdict in Waiting on Oli)
 - 2026-11-02: created NEXT.md
