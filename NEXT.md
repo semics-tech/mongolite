@@ -18,9 +18,12 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - minimatch advisory GHSA-g3hv-75wg-m249 (moderate) is dev-only, via c8 > test-exclude > glob. Dependabot's security update fails (needs minimatch >= 11.0.1, the tree caps at 10.2.6). A package.json `overrides` entry for minimatch would close it if c8 still passes; check before adding.
 
 ## Waiting on Oli
-- #125 (semantic-release-action 6 to 8) reviewed: safe to merge. Breaking changes are the removed `branch` input and a semantic-release >= 20 floor; release.yml uses neither (branches live in .releaserc.json, semantic_version unpinned). Extra plugins changelog@6 and git@10 still fit. If the first release run after merge fails, revert. https://github.com/semics-tech/mongolite/pull/125
-- Dependabot PRs #133 (@types/node patch) and #131 (claude-code-action) are green. Self mode lets me merge only my own PRs: OK to merge green patch/minor Dependabot PRs too?
+
+## Rules from Oli
+- 2026-11-02: I may merge Dependabot PRs once every real check passes (the `auto-merge` job's "unstable status" failure is harmless). Majors get a breaking-change review first.
+- All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-02: merged Dependabot #133, #131, #125 (Release ran green on semantic-release-action v8)
 - 2026-11-02: reviewed #125 breaking changes (verdict in Waiting on Oli)
 - 2026-11-02: created NEXT.md
