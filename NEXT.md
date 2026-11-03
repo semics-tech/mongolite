@@ -7,14 +7,14 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Next
 
 ## Monitor
+- package.json `overrides` (minimatch ^11, glob ^14) are only for the dev toolchain (c8, eslint). Drop them once c8/test-exclude ship fixed ranges: `npm view test-exclude dependencies`
 - CI on master: `gh run list --branch master --workflow ci.yml -L 3`
 - Open PRs and their checks: `gh pr list` then `gh pr checks <n>`
 - New issues: `gh issue list --search "created:>YYYY-MM-DD"` (security-audit.yml opens "Security Vulnerability Found in Dependencies" issues)
-- Prod deps clean: `npm audit --omit=dev` (0 vulns on 2026-11-02)
+- Prod deps clean: `npm audit --omit=dev` (0 vulns on 2026-11-02); full `npm audit` 0 since the overrides on 2026-11-03
 - Dependabot update jobs: `gh run list --workflow "Dependabot Updates" -L 5`
 
 ## Ideas
-- minimatch advisory GHSA-g3hv-75wg-m249 (moderate) is dev-only, via c8 > test-exclude > glob. Dependabot's security update fails (needs minimatch >= 11.0.1, the tree caps at 10.2.6). A package.json `overrides` entry for minimatch would close it if c8 still passes; check before adding.
 
 ## Waiting on Oli
 
@@ -23,6 +23,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-03: overrides for minimatch and glob clear all 14 dev-only npm audit advisories
 - 2026-11-03: removed unused root scratch files `scratch.ts`, `test-projection.ts` (PROJECT.md kept: it's the maintained design doc)
 - 2026-11-02: merged Dependabot #133, #131, #125 (Release ran green on semantic-release-action v8)
 - 2026-11-02: reviewed #125 breaking changes (verdict in Waiting on Oli)
