@@ -5,7 +5,6 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Now
 
 ## Next
-- Remove stray root files `scratch.ts`, `test-projection.ts` and the stale `PROJECT.md` (an old mongolite-ts package.json) once confirmed unused.
 
 ## Monitor
 - CI on master: `gh run list --branch master --workflow ci.yml -L 3`
@@ -24,6 +23,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-03: removed unused root scratch files `scratch.ts`, `test-projection.ts` (PROJECT.md kept: it's the maintained design doc)
 - 2026-11-02: merged Dependabot #133, #131, #125 (Release ran green on semantic-release-action v8)
 - 2026-11-02: reviewed #125 breaking changes (verdict in Waiting on Oli)
 - 2026-11-02: created NEXT.md
