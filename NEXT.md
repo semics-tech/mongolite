@@ -15,6 +15,9 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - Dependabot update jobs: `gh run list --workflow "Dependabot Updates" -L 5`
 
 ## Ideas
+- CI Node matrix doesn't match `engines`: ci.yml tests 22.x and 24.x, but package.json `engines` is `^24.16.0 || >=26.1.0`. So 22 is tested though unsupported, and 26 is supported but untested. Swap 22.x for 26.x (small, CI-only).
+- Clear the 7 `no-explicit-any` lint warnings, all in `src/debugger/query-debugger.ts`, with real types (small, no behaviour change).
+- Cloudflare adapter transactions: it throws "Transactions are not supported yet" (docs/COMPATIBILITY.md). D1 batch() might give atomic writes for `withTransaction`. Larger, needs Oli's go-ahead.
 
 ## Waiting on Oli
 
@@ -23,6 +26,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-04: proposed 3 ideas (Next was empty)
 - 2026-11-03: overrides for minimatch and glob clear all 14 dev-only npm audit advisories
 - 2026-11-03: removed unused root scratch files `scratch.ts`, `test-projection.ts` (PROJECT.md kept: it's the maintained design doc)
 - 2026-11-02: merged Dependabot #133, #131, #125 (Release ran green on semantic-release-action v8)
