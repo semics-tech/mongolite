@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [22.x, 24.x] # Test against supported Node.js versions; 24 is the default (LTS). Node 20 hit EOL 2026-04 and is dropped.
+        node-version: [22.x, 24.x, 26.x] # 24 and 26 match package.json engines; 24 is the default (LTS). 22 stays only while the "Protect Master" ruleset requires it. Node 20 hit EOL 2026-04 and is dropped.
 
     steps:
     - name: Checkout repository
