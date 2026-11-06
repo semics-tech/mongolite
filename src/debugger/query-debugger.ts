@@ -1,6 +1,7 @@
 import { MongoLite } from '../index.js';
 import { FindCursor } from '../cursors/findCursor.js';
-import { Filter } from '../types.js';
+import { DocumentWithId, Filter } from '../types.js';
+import type { IDatabaseAdapter } from '../db.js';
 import * as readline from 'readline';
 import path from 'path';
 
@@ -14,7 +15,7 @@ export class QueryDebugger {
   private client: MongoLite;
   private rl: readline.Interface;
   private currentCollection: string | null = null;
-  private lastFilter: Filter<any> | null = null;
+  private lastFilter: Filter<DocumentWithId> | null = null;
   private lastSqlQuery: { sql: string; params: unknown[] } | null = null;
 
   constructor(options: DebuggerOptions = {}) {
@@ -169,7 +170,7 @@ export class QueryDebugger {
       return;
     }
 
-    let filter: Filter<any>;
+    let filter: Filter<DocumentWithId>;
     try {
       filter = JSON.parse(filterStr);
     } catch (error) {
@@ -185,7 +186,7 @@ export class QueryDebugger {
     // We need to access the internal SQL generation. Let's create a custom cursor
     // that exposes the SQL generation logic
     const debugCursor = new DebugFindCursor(
-      (collection as any).db,
+      (collection as unknown as { db: IDatabaseAdapter }).db,
       this.currentCollection,
       filter,
       { verbose: true }
@@ -223,7 +224,7 @@ export class QueryDebugger {
 
     try {
       // Get the database instance to execute raw SQL
-      const db = (this.client as any).db;
+      const db = (this.client as unknown as { db: IDatabaseAdapter }).db;
 
       console.log('');
       console.log('🔧 Executing SQL:');
@@ -234,7 +235,7 @@ export class QueryDebugger {
       console.log(`📊 Results (${results.length} rows):`);
 
       if (results.length > 0) {
-        results.forEach((row: any, index: number) => {
+        results.forEach((row: unknown, index: number) => {
           console.log(`[${index}]`, JSON.stringify(row, null, 2));
         });
       } else {
@@ -300,7 +301,7 @@ export class QueryDebugger {
 // Extended FindCursor that exposes SQL generation
 class DebugFindCursor<T extends import('../types.js').DocumentWithId> extends FindCursor<T> {
   constructor(
-    db: any,
+    db: IDatabaseAdapter,
     collectionName: string,
     filter: Filter<T>,
     options: { verbose?: boolean } = {}
@@ -310,6 +311,6 @@ class DebugFindCursor<T extends import('../types.js').DocumentWithId> extends Fi
 
   public getSQL(): { sql: string; params: unknown[] } {
     // Access the private queryParts property
-    return (this as any).queryParts;
+    return (this as unknown as { queryParts: { sql: string; params: unknown[] } }).queryParts;
   }
 }
