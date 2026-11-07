@@ -29,8 +29,22 @@ export function parseReview(raw) {
   return value;
 }
 
+// Blanks HTML comments by position, so nested markers can't leave one behind.
+function withoutComments(text) {
+  let out = '';
+  let rest = text;
+  for (;;) {
+    const start = rest.indexOf('<!--');
+    if (start === -1) return out + rest;
+    out += rest.slice(0, start);
+    const end = rest.indexOf('-->', start + 4);
+    if (end === -1) return out;
+    rest = rest.slice(end + 3);
+  }
+}
+
 function hasSection(body, name) {
-  const lines = (body ?? '').replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  const lines = withoutComments(body ?? '').split('\n');
   const start = lines.findIndex((line) => line.trim().toLowerCase() === `## ${name}`.toLowerCase());
   if (start === -1) return false;
   const rest = lines.slice(start + 1);
@@ -91,7 +105,7 @@ export function decide({ pr, eventSha, files, requiredChecks, checkRuns, securit
 // Review text is model output on a public PR: no mentions, no hidden markers.
 export function clean(text) {
   return String(text ?? '')
-    .replace(/<!--|-->/g, '')
+    .replace(/[<>]/g, '')
     .replace(/@/g, '@​')
     .replace(/\s+/g, ' ')
     .trim()

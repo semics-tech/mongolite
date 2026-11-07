@@ -101,6 +101,14 @@ test('review text cannot mention people or hide markers', () => {
   assert.ok(!text.includes('<!--'));
   assert.ok(!/@[a-z]/.test(text));
 });
+test('nested comment markers are removed too', () => {
+  const text = clean('a <!<!---->-- b --!> c <img src=x>');
+  assert.ok(!/[<>]/.test(text));
+});
+test('a section holding only nested comments counts as empty', () =>
+  blockedBy((i) => (i.pr.body = '## Testing\n<!-- a <!-- b -->\n## Risk\ny\n## How to revert\nz\n'), /Testing/));
+test('an unclosed comment hides the rest', () =>
+  blockedBy((i) => (i.pr.body = '## Testing\nx\n## Risk\ny\n<!-- ## How to revert\nz\n'), /How to revert/));
 test('comment says watch only and carries the round', () => {
   const body = renderComment({ sha: 'abc1234', round: 2, reasons: ['x'], security: pass, code: null });
   assert.match(body, /^<!-- autopilot-gate rounds=2 sha=abc1234 -->/);
