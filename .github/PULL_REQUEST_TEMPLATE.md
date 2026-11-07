@@ -35,6 +35,14 @@ Describe the tests you ran to verify your changes.
 <!-- Replace the example step below with your actual manual testing steps. Add, remove, or expand steps as needed. -->
 1. [Example] Describe the manual action taken and the expected outcome.
 
+## Risk
+
+What could this break, and who would notice? Say "Low" and why if it's a small change.
+
+## How to revert
+
+How to undo this once it's merged, including anything a plain revert won't undo.
+
 ## Checklist
 
 - [ ] My code follows the project's style guidelines (`npm run lint`)

@@ -61,6 +61,14 @@ jobs:
     #     NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # Store your NPM token as a secret in GitHub
 
   # Auto-approve Dependabot PRs for minor and patch updates
+  gate-logic:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: node --test .github/scripts/autopilot-gate.test.mjs
+
   auto-approve:
     needs: build-and-test
     runs-on: ubuntu-latest

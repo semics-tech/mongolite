@@ -4,7 +4,8 @@ name: Claude Security Review
 # it finds. Runs on the CLAUDE_CODE_OAUTH_TOKEN secret (a Claude Max token from
 # `claude setup-token`). PRs from forks don't get repository secrets, so on
 # those the job skips instead of failing, and outside contributors can't spend
-# the token. Advisory only: it is not a required check.
+# the token. Advisory only: it is not a required check. Agent PRs get this review
+# from autopilot-gate.yml instead, so they don't pay for it twice.
 
 on:
   pull_request:
@@ -21,7 +22,7 @@ jobs:
   security-review:
     # Dependabot runs get no secrets either; its bumps are covered by
     # Dependabot alerts and CodeQL.
-    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft && !startsWith(github.head_ref, 'claude/autopilot-')
     runs-on: ubuntu-latest
     permissions:
       contents: read
