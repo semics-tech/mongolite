@@ -113,8 +113,8 @@ export class CloudflareDurableObjectAdapter implements IDatabaseAdapter {
    */
   async connect(): Promise<void> {
     if (this.recovered) return;
-    this.recovered = true;
     this.atomically(() => this.recover());
+    this.recovered = true;
   }
 
   /**
