@@ -280,8 +280,7 @@ export class FindCursor<T extends DocumentWithId> {
     if (field === '_id' && elementPrefix === 'data') {
       switch (operator) {
         case '$eq':
-          params.push(toSQLiteValue(value));
-          return '_id = ?';
+          return `_id = '${toSQLiteValue(value)}'`;
         case '$ne':
           params.push(toSQLiteValue(value));
           return '_id <> ?';
