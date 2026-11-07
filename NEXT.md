@@ -18,15 +18,15 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Ideas
 
 ## Waiting on Oli
-- CI now tests Node 26 too. To finish matching `engines`: in the "Protect Master" ruleset, make `build-and-test (26.x)` a required check instead of `build-and-test (22.x)`, then I'll drop 22.x from ci.yml. Repo settings > Rules > Rulesets.
-
 - Cloudflare transactions: this is a `feat`, so it releases a minor version and I can't merge it myself. Options: (a) take `ctx.storage` as an optional 2nd adapter arg and add a sync-only `session.withTransactionSync(fn)` using `transactionSync` (small, honest, not driver-shaped); (b) emulate async `withTransaction` with an undo log (larger, risky without a real workerd test). I lean (a). Reply with a/b and I'll open the PR for you to merge.
 
 ## Rules from Oli
+- 2026-11-07: keep Node 22, 24 and 26 compatibility. Do not drop 22.x from ci.yml.
 - 2026-11-02: I may merge Dependabot PRs once every real check passes (the `auto-merge` job's "unstable status" failure is harmless). Majors get a breaking-change review first.
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-07: Oli decided CI stays on Node 22, 24 and 26 (no 22.x drop); recorded in Rules
 - 2026-11-07: Oli approved Cloudflare transactions; researched constraints, planned in Next/Waiting on Oli
 - 2026-11-05: cleared the 7 `no-explicit-any` lint warnings in query-debugger.ts
 - 2026-11-05: CI matrix tests Node 26.x (engines says >=26.1.0)
