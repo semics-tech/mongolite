@@ -266,8 +266,11 @@ export class CloudflareDurableObjectAdapter implements IDatabaseAdapter {
       `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL`
     ).filter((t) => !t.name.startsWith(UNDO_TRIGGER_PREFIX));
     for (const t of parked) this.sql.exec(`DROP TRIGGER ${quoteIdent(t.name)}`);
-    for (const e of entries) this.sql.exec(e.undo_sql);
-    for (const t of parked) this.sql.exec(t.sql);
+    try {
+      for (const e of entries) this.sql.exec(e.undo_sql);
+    } finally {
+      for (const t of parked) this.sql.exec(t.sql);
+    }
     this.sql.exec(`DELETE FROM ${UNDO_TABLE} WHERE seq > ?`, seq);
   }
 
