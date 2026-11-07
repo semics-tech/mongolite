@@ -5,6 +5,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Now
 
 ## Next
+- Cloudflare adapter transactions (Oli said yes, 2026-11-07). Blocked on a design choice, see Waiting on Oli. Constraint found: session.ts relies on raw `BEGIN IMMEDIATE`/`SAVEPOINT` plus an async callback held open across awaits. Durable Object SqlStorage rejects raw BEGIN/SAVEPOINT and `ctx.storage.transactionSync()` takes only a synchronous callback, so the node-sqlite approach cannot be reused as is.
 
 ## Monitor
 - package.json `overrides` (minimatch ^11, glob ^14) are only for the dev toolchain (c8, eslint). Drop them once c8/test-exclude ship fixed ranges: `npm view test-exclude dependencies`
@@ -15,16 +16,18 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - Dependabot update jobs: `gh run list --workflow "Dependabot Updates" -L 5`
 
 ## Ideas
-- Cloudflare adapter transactions: it throws "Transactions are not supported yet" (docs/COMPATIBILITY.md). D1 batch() might give atomic writes for `withTransaction`. Larger, needs Oli's go-ahead.
 
 ## Waiting on Oli
 - CI now tests Node 26 too. To finish matching `engines`: in the "Protect Master" ruleset, make `build-and-test (26.x)` a required check instead of `build-and-test (22.x)`, then I'll drop 22.x from ci.yml. Repo settings > Rules > Rulesets.
+
+- Cloudflare transactions: this is a `feat`, so it releases a minor version and I can't merge it myself. Options: (a) take `ctx.storage` as an optional 2nd adapter arg and add a sync-only `session.withTransactionSync(fn)` using `transactionSync` (small, honest, not driver-shaped); (b) emulate async `withTransaction` with an undo log (larger, risky without a real workerd test). I lean (a). Reply with a/b and I'll open the PR for you to merge.
 
 ## Rules from Oli
 - 2026-11-02: I may merge Dependabot PRs once every real check passes (the `auto-merge` job's "unstable status" failure is harmless). Majors get a breaking-change review first.
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-07: Oli approved Cloudflare transactions; researched constraints, planned in Next/Waiting on Oli
 - 2026-11-05: cleared the 7 `no-explicit-any` lint warnings in query-debugger.ts
 - 2026-11-05: CI matrix tests Node 26.x (engines says >=26.1.0)
 - 2026-11-04: proposed 3 ideas (Next was empty)
