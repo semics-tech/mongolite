@@ -19,6 +19,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Ideas
 
 ## Waiting on Oli
+- Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then.
 - Cloudflare transactions: this is a `feat`, so it releases a minor version and I can't merge it myself. Options: (a) take `ctx.storage` as an optional 2nd adapter arg and add a sync-only `session.withTransactionSync(fn)` using `transactionSync` (small, honest, not driver-shaped); (b) emulate async `withTransaction` with an undo log (larger, risky without a real workerd test). I lean (a). Reply with a/b and I'll open the PR for you to merge.
 
 ## Rules from Oli
