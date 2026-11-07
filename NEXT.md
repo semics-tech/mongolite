@@ -5,7 +5,6 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Now
 
 ## Next
-- Cloudflare adapter transactions (Oli said yes, 2026-11-07). Blocked on a design choice, see Waiting on Oli. Constraint found: session.ts relies on raw `BEGIN IMMEDIATE`/`SAVEPOINT` plus an async callback held open across awaits. Durable Object SqlStorage rejects raw BEGIN/SAVEPOINT and `ctx.storage.transactionSync()` takes only a synchronous callback, so the node-sqlite approach cannot be reused as is.
 
 ## Monitor
 - Watch-only merge gate (`autopilot-gate.yml`): it comments on `claude/autopilot-*` PRs and never merges. Merging rules are unchanged. Leave its workflow, script and `REVIEW.md` alone.
@@ -20,7 +19,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 
 ## Waiting on Oli
 - Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then.
-- Cloudflare transactions: this is a `feat`, so it releases a minor version and I can't merge it myself. Options: (a) take `ctx.storage` as an optional 2nd adapter arg and add a sync-only `session.withTransactionSync(fn)` using `transactionSync` (small, honest, not driver-shaped); (b) emulate async `withTransaction` with an undo log (larger, risky without a real workerd test). I lean (a). Reply with a/b and I'll open the PR for you to merge.
+- PR `claude/autopilot-cf-transactions` (Cloudflare adapter transactions, undo log, a releasing `feat`): review and merge it. Oli chose "both: MongoDB-compatible API on approved Cloudflare methods". Untested on real workerd; see the PR.
 
 ## Rules from Oli
 - 2026-11-07: every PR body needs filled-in `## Testing`, `## Risk` and `## How to revert` sections. Testing shows the commands you ran and their results, not just "tests pass". Before opening a PR, re-read the whole diff as if someone else wrote it. Keep PRs small. If the gate's reviews ask for changes three times, stop, say why in Waiting on Oli and leave the PR open.
@@ -29,6 +28,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR open for Oli to merge
 - 2026-11-07: added the watch-only merge gate, `REVIEW.md` and the Risk and How to revert PR sections
 - 2026-11-07: Oli decided CI stays on Node 22, 24 and 26 (no 22.x drop); recorded in Rules
 - 2026-11-07: Oli approved Cloudflare transactions; researched constraints, planned in Next/Waiting on Oli
