@@ -193,7 +193,8 @@ export class CloudflareDurableObjectAdapter implements IDatabaseAdapter {
 
   /** Handles BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE; returns false for ordinary SQL. */
   private async handleTransactionStatement(sql: string): Promise<boolean> {
-    const text = sql.trim().replace(/;+\s*$/, '');
+    let text = sql.trim();
+    while (text.endsWith(';')) text = text.slice(0, -1).trimEnd();
     if (/^BEGIN(\s+(DEFERRED|IMMEDIATE|EXCLUSIVE))?(\s+TRANSACTION)?$/i.test(text)) {
       if (this.txActive) throw new Error('cannot start a transaction within a transaction');
       await this.connect();
