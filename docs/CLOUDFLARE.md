@@ -197,3 +197,15 @@ function createClient(adapter: IDatabaseAdapter): MongoLite {
 | Node.js / Bun / CLI | Default (`new MongoLite('./my.db')`) |
 | Cloudflare Durable Objects | `CloudflareDurableObjectAdapter` |
 | Testing / CI | `':memory:'` path with default adapter, or `MockSqlStorage` (see tests) |
+
+## Transactions
+
+`client.startSession()` and `session.withTransaction()` work on this adapter through an undo-log emulation. Pass `ctx.storage` as a second argument so commit, rollback and crash recovery run inside `transactionSync`, and call `await client.connect()` at start-up so a transaction cut short by an eviction is rolled back:
+
+```ts
+const adapter = new CloudflareDurableObjectAdapter(ctx.storage.sql, ctx.storage);
+this.client = new MongoLite(adapter);
+ctx.blockConcurrencyWhile(() => this.client.connect());
+```
+
+See [COMPATIBILITY.md](./COMPATIBILITY.md#transactions-partial-emulated-on-cloudflare) for how it differs from MongoDB and what has not been tested on a real workerd.

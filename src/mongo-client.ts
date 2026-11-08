@@ -62,13 +62,13 @@ export class MongoLite {
   /**
    * Starts a session for multi-document transactions, like the MongoDB driver's
    * `client.startSession()`. Supported on the better-sqlite3, `node:sqlite` and
-   * sql.js adapters; the Cloudflare adapter throws.
+   * sql.js adapters and (emulated, see docs/CLOUDFLARE.md) the Cloudflare adapter.
    */
   startSession(): ClientSession {
     if (!this.db.supportsTransactions) {
       throw new MongoLiteTransactionError(
-        'Transactions are not supported yet on this adapter (Cloudflare Durable Objects and ' +
-          'custom adapters). Use the better-sqlite3, node:sqlite or sql.js adapters.'
+        'Transactions are not supported on this adapter. Use the better-sqlite3, node:sqlite, ' +
+          'sql.js or Cloudflare Durable Object adapters, or set supportsTransactions on a custom adapter that handles BEGIN/COMMIT/ROLLBACK.'
       );
     }
     const session = new ClientSession(this.gated, (s) => this.sessions.delete(s));

@@ -59,8 +59,14 @@ class MockSqlStorage implements SqlStorage {
     query: string,
     ...bindings: SqlStorageValue[]
   ): SqlStorageCursor<T> {
+    // Like Durable Object SqlStorage, refuse transaction-control statements.
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|END)\b/i.test(query)) {
+      throw new Error(
+        'To execute a transaction, please use the state.storage.transactionSync() API'
+      );
+    }
     const stmt = this.db.prepare(query);
-    const isSelect = query.trim().toUpperCase().startsWith('SELECT');
+    const isSelect = /^\s*SELECT/i.test(query);
 
     if (isSelect) {
       const rows = stmt.all(...bindings) as T[];
@@ -372,6 +378,203 @@ describe('CloudflareDurableObjectAdapter', () => {
       await users.updateOne({ _id: 'ws2' }, { $set: { age: 21 } });
 
       await eventPromise;
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Transactions (undo-log emulation)
+  // -------------------------------------------------------------------------
+
+  describe('transactions', () => {
+    const names = async () => (await users.find({}).toArray()).map((u) => u.name).sort();
+
+    it('commits on success and returns the callback value', async () => {
+      const session = client.startSession();
+      const out = await session.withTransaction(async () => {
+        await users.insertOne({ name: 'A', age: 1 }, { session });
+        await users.insertOne({ name: 'B', age: 2 }, { session });
+        return 42;
+      });
+      assert.strictEqual(out, 42);
+      assert.deepStrictEqual(await names(), ['A', 'B']);
+      await session.endSession();
+    });
+
+    it('rolls back inserts, updates and deletes when the callback throws', async () => {
+      await users.insertMany([
+        { name: 'keep', age: 1 },
+        { name: 'gone', age: 2 },
+      ]);
+      const session = client.startSession();
+      await assert.rejects(
+        session.withTransaction(async () => {
+          await users.insertOne({ name: 'new', age: 3 }, { session });
+          await users.updateOne({ name: 'keep' }, { $set: { age: 99 } }, { session });
+          await users.deleteOne({ name: 'gone' }, { session });
+          // read-your-writes inside the transaction
+          assert.strictEqual(
+            (await users.findOne({ name: 'new' }, undefined, { session }))?.age,
+            3
+          );
+          throw new Error('boom');
+        }),
+        /boom/
+      );
+      assert.deepStrictEqual(await names(), ['gone', 'keep']);
+      assert.strictEqual((await users.findOne({ name: 'keep' }))?.age, 1);
+      await session.endSession();
+    });
+
+    it('aborts the whole transaction on a duplicate _id', async () => {
+      await users.insertOne({ _id: 'x', name: 'x', age: 1 });
+      const session = client.startSession();
+      await assert.rejects(
+        session.withTransaction(async () => {
+          await users.insertOne({ name: 'before', age: 1 }, { session });
+          await users.insertOne({ _id: 'x', name: 'dup', age: 1 }, { session });
+        })
+      );
+      assert.deepStrictEqual(await names(), ['x']);
+      await session.endSession();
+    });
+
+    it('insertMany inside a transaction rolls back with the transaction (savepoint)', async () => {
+      const session = client.startSession();
+      await assert.rejects(
+        session.withTransaction(async () => {
+          await users.insertMany(
+            [
+              { name: 'm1', age: 1 },
+              { name: 'm2', age: 2 },
+            ],
+            { session }
+          );
+          throw new Error('nope');
+        })
+      );
+      assert.deepStrictEqual(await names(), []);
+      await session.endSession();
+    });
+
+    it('reports correct modifiedCount despite undo-trigger writes', async () => {
+      await users.insertMany([
+        { name: 'a', age: 1 },
+        { name: 'b', age: 1 },
+      ]);
+      const session = client.startSession();
+      await session.withTransaction(async () => {
+        const r = await users.updateMany({ age: 1 }, { $set: { age: 2 } }, { session });
+        assert.strictEqual(r.modifiedCount, 2);
+      });
+      await session.endSession();
+    });
+
+    it('operations without the session wait for the transaction, then see its result', async () => {
+      const session = client.startSession();
+      let outside: Promise<unknown> | undefined;
+      await session.withTransaction(async () => {
+        await users.insertOne({ name: 'in', age: 1 }, { session });
+        outside = users.find({}).toArray();
+      });
+      assert.strictEqual(((await outside) as unknown[]).length, 1);
+      await session.endSession();
+    });
+
+    it('leaves no triggers or undo rows behind after commit or rollback', async () => {
+      const session = client.startSession();
+      await session.withTransaction(async () => {
+        await users.insertOne({ name: 'a', age: 1 }, { session });
+      });
+      await assert.rejects(
+        session.withTransaction(async () => {
+          await users.insertOne({ name: 'b', age: 1 }, { session });
+          throw new Error('x');
+        })
+      );
+      const trig = await adapter.all<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type='trigger'`
+      );
+      assert.deepStrictEqual(trig, []);
+      const undo = await adapter.all(`SELECT * FROM __mongolite_undo__`);
+      assert.deepStrictEqual(undo, []);
+      await session.endSession();
+    });
+
+    it('does not emit spurious change-stream rows when rolling back', async () => {
+      const cs = users.watch();
+      await new Promise((r) => setTimeout(r, 20));
+      await cs.close();
+      const countChanges = async () =>
+        (await adapter.get<{ c: number }>(`SELECT COUNT(*) AS c FROM __mongolite_changes__`))!.c;
+      const before = await countChanges();
+      const session = client.startSession();
+      await assert.rejects(
+        session.withTransaction(async () => {
+          await users.insertOne({ name: 'ghost', age: 1 }, { session });
+          throw new Error('x');
+        })
+      );
+      assert.strictEqual(await countChanges(), before);
+      await session.endSession();
+    });
+
+    it('recovers a transaction left half-done by an eviction on connect()', async () => {
+      await users.insertOne({ name: 'safe', age: 1 });
+      const s = client.startSession();
+      s.startTransaction();
+      await users.insertOne({ name: 'orphan', age: 1 }, { session: s });
+      await users.deleteOne({ name: 'safe' }, { session: s });
+      // simulate eviction: a fresh adapter over the same storage, session never finished
+      const fresh = new CloudflareDurableObjectAdapter(mockSql);
+      await fresh.connect();
+      const after = new MongoLite(fresh).collection<UserDoc>('users');
+      assert.deepStrictEqual(
+        (await after.find({}).toArray()).map((u) => u.name),
+        ['safe']
+      );
+      assert.deepStrictEqual(
+        await fresh.all(`SELECT name FROM sqlite_master WHERE type='trigger'`),
+        []
+      );
+    });
+
+    it('uses storage.transactionSync for commit, rollback and recovery when given', async () => {
+      let calls = 0;
+      const storage = {
+        transactionSync<T>(fn: () => T): T {
+          calls++;
+          return fn();
+        },
+      };
+      const a = new CloudflareDurableObjectAdapter(mockSql, storage);
+      const c = new MongoLite(a);
+      await c.connect();
+      const col = c.collection<UserDoc>('tx2');
+      await col.ensureTable();
+      const s = c.startSession();
+      await s.withTransaction(async () => {
+        await col.insertOne({ name: 'z', age: 1 }, { session: s });
+      });
+      assert.ok(calls >= 3); // recovery, begin, commit
+      await s.endSession();
+    });
+
+    it('supports raw SAVEPOINT / ROLLBACK TO / RELEASE through the adapter', async () => {
+      await adapter.exec('BEGIN IMMEDIATE');
+      await users.insertOne({ name: 'one', age: 1 });
+      await adapter.exec('SAVEPOINT sp1');
+      await users.insertOne({ name: 'two', age: 2 });
+      await adapter.exec('ROLLBACK TO sp1');
+      await adapter.exec('RELEASE sp1');
+      await adapter.exec('COMMIT');
+      assert.deepStrictEqual(await names(), ['one']);
+    });
+
+    it('rejects nested BEGIN and COMMIT without BEGIN', async () => {
+      await assert.rejects(adapter.exec('COMMIT'), /no transaction is active/);
+      await adapter.exec('BEGIN');
+      await assert.rejects(adapter.exec('BEGIN'), /within a transaction/);
+      await adapter.exec('ROLLBACK');
     });
   });
 });
