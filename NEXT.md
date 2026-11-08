@@ -23,6 +23,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - Cloudflare transactions: this is a `feat`, so it releases a minor version and I can't merge it myself. Options: (a) take `ctx.storage` as an optional 2nd adapter arg and add a sync-only `session.withTransactionSync(fn)` using `transactionSync` (small, honest, not driver-shaped); (b) emulate async `withTransaction` with an undo log (larger, risky without a real workerd test). I lean (a). Reply with a/b and I'll open the PR for you to merge.
 
 ## Rules from Oli
+- 2026-11-08: keep Node 22 in CI (and as a required check). It covers the better-sqlite3 driver on Node below 24.16.
 - 2026-11-07: every PR body needs filled-in `## Testing`, `## Risk` and `## How to revert` sections. Testing shows the commands you ran and their results, not just "tests pass". Before opening a PR, re-read the whole diff as if someone else wrote it. Keep PRs small. If the gate's reviews ask for changes three times, stop, say why in Waiting on Oli and leave the PR open.
 - 2026-11-07: keep Node 22, 24 and 26 compatibility. Do not drop 22.x from ci.yml.
 - 2026-11-02: I may merge Dependabot PRs once every real check passes (the `auto-merge` job's "unstable status" failure is harmless). Majors get a breaking-change review first.
