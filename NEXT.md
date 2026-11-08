@@ -3,6 +3,7 @@
 The project's working memory. `/next` reads it first and updates it last, every run. Keep it short: move finished items to Done and prune Done to the last 10.
 
 ## Now
+- Cloudflare transactions: PR #146 (undo-log emulation, option b) is open and green, waiting for Oli to merge (releasing `feat`).
 
 ## Next
 
@@ -19,7 +20,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 
 ## Waiting on Oli
 - Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then.
-- PR `claude/autopilot-cf-transactions` (Cloudflare adapter transactions, undo log, a releasing `feat`): review and merge it. Oli chose "both: MongoDB-compatible API on approved Cloudflare methods". Untested on real workerd; see the PR.
+- #146 Cloudflare transactions: all checks pass. The watch-only gate would block it: it's a releasing `feat`, it changes src/ and it's on review round 4 (limit 3). Per the rules I've stopped changing it. Oli: merge, or say what to change. https://github.com/semics-tech/mongolite/pull/146
 
 ## Rules from Oli
 - 2026-11-07: every PR body needs filled-in `## Testing`, `## Risk` and `## How to revert` sections. Testing shows the commands you ran and their results, not just "tests pass". Before opening a PR, re-read the whole diff as if someone else wrote it. Keep PRs small. If the gate's reviews ask for changes three times, stop, say why in Waiting on Oli and leave the PR open.
@@ -28,7 +29,8 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
-- 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR open for Oli to merge
+- 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR #146
+- 2026-11-08: merged Dependabot #149 (eslint 10.14.0); corrected Node 22 CI comment (#147)
 - 2026-11-07: added the watch-only merge gate, `REVIEW.md` and the Risk and How to revert PR sections
 - 2026-11-07: Oli decided CI stays on Node 22, 24 and 26 (no 22.x drop); recorded in Rules
 - 2026-11-07: Oli approved Cloudflare transactions; researched constraints, planned in Next/Waiting on Oli
