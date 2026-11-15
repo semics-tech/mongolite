@@ -1,3 +1,17 @@
+# [1.7.0](https://github.com/semics-tech/mongolite/compare/v1.6.0...v1.7.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* **cloudflare:** always restore parked triggers if an undo statement fails ([50facdd](https://github.com/semics-tech/mongolite/commit/50facddce9ed89f4fe3cad8f1c68f6c4cf8aab1b))
+* **cloudflare:** mark recovery done only after it succeeds ([fbfd8cc](https://github.com/semics-tech/mongolite/commit/fbfd8cceddcaf2414421598d6b97aac20c972a73))
+* **cloudflare:** strip trailing semicolons without a backtracking regex ([c63f1c2](https://github.com/semics-tech/mongolite/commit/c63f1c25d4b57b44bd8dd76e650ac83075da95be))
+
+
+### Features
+
+* **cloudflare:** emulate session transactions with an undo log ([7edbbd2](https://github.com/semics-tech/mongolite/commit/7edbbd2af33914929285fe5cb96088340e8a9248))
+
 # [1.6.0](https://github.com/semics-tech/mongolite/compare/v1.5.0...v1.6.0) (2026-10-26)
 
 
