@@ -3,11 +3,11 @@
 The project's working memory. `/next` reads it first and updates it last, every run. Keep it short: move finished items to Done and prune Done to the last 10.
 
 ## Now
-- Cloudflare transactions: PR #146 (undo-log emulation, option b) is open and green, waiting for Oli to merge (releasing `feat`).
 
 ## Next
 
 ## Monitor
+- Cloudflare transactions (1.7.0) not covered by tests: recovery after a real eviction mid-transaction, and concurrent requests during an open transaction.
 - Watch-only merge gate (`autopilot-gate.yml`): it comments on `claude/autopilot-*` PRs and never merges. Merging rules are unchanged. Leave its workflow, script and `REVIEW.md` alone.
 - package.json `overrides` (minimatch ^11, glob ^14) are only for the dev toolchain (c8, eslint). Drop them once c8/test-exclude ship fixed ranges: `npm view test-exclude dependencies`
 - CI on master: `gh run list --branch master --workflow ci.yml -L 3`
@@ -20,15 +20,16 @@ The project's working memory. `/next` reads it first and updates it last, every 
 
 ## Waiting on Oli
 - Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then.
-- #146 Cloudflare transactions: all checks pass. The watch-only gate would block it: it's a releasing `feat`, it changes src/ and it's on review round 4 (limit 3). Per the rules I've stopped changing it. Oli: merge, or say what to change. https://github.com/semics-tech/mongolite/pull/146
 
 ## Rules from Oli
+- 2026-11-15: be more autonomous. Merge PRs myself (feat and releasing ones included) once every real check passes and I've verified them; report after. Overrides the gate's round-limit stop for merging.
 - 2026-11-07: every PR body needs filled-in `## Testing`, `## Risk` and `## How to revert` sections. Testing shows the commands you ran and their results, not just "tests pass". Before opening a PR, re-read the whole diff as if someone else wrote it. Keep PRs small. If the gate's reviews ask for changes three times, stop, say why in Waiting on Oli and leave the PR open.
 - 2026-11-07: keep Node 22, 24 and 26 compatibility. Do not drop 22.x from ci.yml.
 - 2026-11-02: I may merge Dependabot PRs once every real check passes (the `auto-merge` job's "unstable status" failure is harmless). Majors get a breaking-change review first.
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-15: merged #146 Cloudflare transactions, released 1.7.0 to npm; checked on local workerd first (4 scenarios correct)
 - 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR #146
 - 2026-11-08: merged Dependabot #149 (eslint 10.14.0); corrected Node 22 CI comment (#147)
 - 2026-11-07: added the watch-only merge gate, `REVIEW.md` and the Risk and How to revert PR sections
