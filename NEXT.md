@@ -29,6 +29,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR #146
 - 2026-11-08: merged Dependabot #149 (eslint 10.14.0); corrected Node 22 CI comment (#147)
 - 2026-11-07: added the watch-only merge gate, `REVIEW.md` and the Risk and How to revert PR sections
 - 2026-11-07: Oli decided CI stays on Node 22, 24 and 26 (no 22.x drop); recorded in Rules

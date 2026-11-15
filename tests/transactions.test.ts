@@ -359,18 +359,19 @@ describe('transactions (node:sqlite availability)', { skip: nodeSqliteSkip }, ()
   });
 });
 
-describe('transactions (Cloudflare adapter)', () => {
-  it('throws a clear "not supported yet" error', async () => {
+describe('transactions (adapter without support)', () => {
+  it('throws a clear "not supported" error', async () => {
     const storage = { exec: () => ({}) } as unknown as SqlStorage;
-    const client = new MongoLiteClient(new CloudflareDurableObjectAdapter(storage));
+    const adapter = new CloudflareDurableObjectAdapter(storage);
+    Object.defineProperty(adapter, 'supportsTransactions', { value: false });
+    const client = new MongoLiteClient(adapter);
     assert.throws(
       () => client.startSession(),
-      (err: Error) =>
-        err instanceof MongoLiteTransactionError && /not supported yet/.test(err.message)
+      (err: Error) => err instanceof MongoLiteTransactionError && /not supported/.test(err.message)
     );
     await assert.rejects(
       client.withSession(async () => 1),
-      /not supported yet/
+      /not supported/
     );
   });
 });

@@ -182,7 +182,7 @@ await session.withTransaction(
 
 When another connection or process holds the write lock for longer than `busyTimeout`, `BEGIN IMMEDIATE` (or a statement) fails with `TransactionBusyError` (`code: 'SQLITE_BUSY'`, `errorLabels: ['TransientTransactionError']`, `hasErrorLabel(label)`), on node:sqlite, better-sqlite3 and sql.js. With `maxRetries` set, `withTransaction` rolls back, waits, and runs the callback again from scratch; after the limit it throws the last `TransactionBusyError`.
 
-> **Warning:** the callback may run more than once. It must be safe to re-run: no non-database side effects (emails, HTTP calls, counters) unless they are idempotent. Errors thrown by the callback itself, and commit errors other than busy, are never retried. `startTransaction()` is not retried; check `err.hasErrorLabel('TransientTransactionError')` and retry yourself. The Cloudflare adapter still throws "not supported yet".
+> **Warning:** the callback may run more than once. It must be safe to re-run: no non-database side effects (emails, HTTP calls, counters) unless they are idempotent. Errors thrown by the callback itself, and commit errors other than busy, are never retried. `startTransaction()` is not retried; check `err.hasErrorLabel('TransientTransactionError')` and retry yourself. On Cloudflare Durable Objects transactions are emulated with an undo log; see [COMPATIBILITY.md](./COMPATIBILITY.md#transactions-partial-emulated-on-cloudflare).
 
 ### `watch(options?): ChangeStream<T>`
 
