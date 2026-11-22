@@ -19,7 +19,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Ideas
 
 ## Waiting on Oli
-- Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then.
+- Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then. Recommendation: let it merge docs/test/chore-only PRs first, once the trial is done.
 
 ## Rules from Oli
 - 2026-11-15: be more autonomous. Merge PRs myself (feat and releasing ones included) once every real check passes and I've verified them; report after. Overrides the gate's round-limit stop for merging.
@@ -29,6 +29,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-22: health check clean (master CI green, no open PRs or issues); tidied Waiting on Oli
 - 2026-11-15: merged #146 Cloudflare transactions, released 1.7.0 to npm; checked on local workerd first (4 scenarios correct)
 - 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR #146
 - 2026-11-08: merged Dependabot #149 (eslint 10.14.0); corrected Node 22 CI comment (#147)
