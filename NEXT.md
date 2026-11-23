@@ -29,6 +29,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-23: when blocked (a): added direct unit tests for queryOperators.ts (was 62% line coverage)
 - 2026-11-22: health check clean (master CI green, no open PRs or issues); tidied Waiting on Oli
 - 2026-11-15: merged #146 Cloudflare transactions, released 1.7.0 to npm; checked on local workerd first (4 scenarios correct)
 - 2026-11-07: built Cloudflare transactions (undo log + optional transactionSync), PR #146
