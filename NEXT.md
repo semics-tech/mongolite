@@ -21,6 +21,8 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Waiting on Oli
 - Merge gate trial: after about 5 agent PRs plus one deliberately bad test change, Oli decides whether the gate may merge low-risk PRs. It only comments until then. Recommendation: let it merge docs/test/chore-only PRs first, once the trial is done.
 
+- Node 22 in CI: the PA (2026-11-23, no new words from Oli) says the Node 22 required check is gone from the ruleset and asks to drop 22.x from ci.yml. That contradicts Oli's 2026-11-07 rule, so left as is. Decision: drop 22.x? Recommendation: yes if the ruleset now requires only 24.x and 26.x, but Oli should say so (also the README's better-sqlite3/Node 22 claim would need a look).
+
 ## Rules from Oli
 - 2026-11-15: be more autonomous. Merge PRs myself (feat and releasing ones included) once every real check passes and I've verified them; report after. Overrides the gate's round-limit stop for merging.
 - 2026-11-07: every PR body needs filled-in `## Testing`, `## Risk` and `## How to revert` sections. Testing shows the commands you ran and their results, not just "tests pass". Before opening a PR, re-read the whole diff as if someone else wrote it. Keep PRs small. If the gate's reviews ask for changes three times, stop, say why in Waiting on Oli and leave the PR open.
@@ -29,6 +31,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-23: README and API.md now describe Cloudflare transactions (undo log) as in 1.7.0 instead of 'throws'
 - 2026-11-23: when blocked (a): added direct unit tests for queryOperators.ts (was 62% line coverage)
 - 2026-11-22: health check clean (master CI green, no open PRs or issues); tidied Waiting on Oli
 - 2026-11-15: merged #146 Cloudflare transactions, released 1.7.0 to npm; checked on local workerd first (4 scenarios correct)
