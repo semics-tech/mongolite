@@ -160,7 +160,7 @@ Each write is atomic on its own, and `insertMany` runs as a single SQLite transa
 
 ### `client.startSession(): ClientSession`
 
-Starts a session (also `client.withSession(fn)`). Use `session.withTransaction(async () => { ... })` and pass `{ session }` as the last option to collection calls (`insertOne`, `insertMany`, `findOne`, `find`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `replaceOne`, `findOneAnd*`, `countDocuments`, `distinct`, `aggregate`, …) that belong in the transaction. Commit on success, rollback on throw. Operations without the session wait until the transaction ends. Supported on better-sqlite3, `node:sqlite` and sql.js; the Cloudflare adapter throws. Details and differences from MongoDB are in [COMPATIBILITY.md](./COMPATIBILITY.md#transactions-partial-node-adapters-not-cloudflare).
+Starts a session (also `client.withSession(fn)`). Use `session.withTransaction(async () => { ... })` and pass `{ session }` as the last option to collection calls (`insertOne`, `insertMany`, `findOne`, `find`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `replaceOne`, `findOneAnd*`, `countDocuments`, `distinct`, `aggregate`, …) that belong in the transaction. Commit on success, rollback on throw. Operations without the session wait until the transaction ends. Supported on better-sqlite3, `node:sqlite` and sql.js, and emulated with an undo log on the Cloudflare Durable Object adapter. Details and differences from MongoDB are in [COMPATIBILITY.md](./COMPATIBILITY.md#transactions-partial-emulated-on-cloudflare).
 
 ### `session.withTransaction(fn, options?)` retry (experimental)
 

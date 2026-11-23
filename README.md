@@ -73,7 +73,7 @@ main();
 
 ### Transactions
 
-Multi-document transactions work on the Node (`node:sqlite`, `better-sqlite3`) and sql.js adapters; the Cloudflare adapter throws.
+Multi-document transactions work on the Node (`node:sqlite`, `better-sqlite3`) and sql.js adapters. On the Cloudflare Durable Object adapter they are emulated with an undo log (not MongoDB-identical: writes apply immediately and are undone on abort, DDL is not undone, and it is untested on real workerd). Pass `ctx.storage` as the adapter's second argument and call `await client.connect()` at start-up so an interrupted transaction is rolled back; see compatibility below.
 Pass `{ session }` to every call that belongs in the transaction. It commits when the callback resolves and rolls back if it throws.
 
 ```typescript
@@ -99,7 +99,7 @@ await session.withTransaction(
 );
 ```
 
-See [compatibility](./docs/COMPATIBILITY.md#transactions-partial-node-adapters-not-cloudflare) for the differences from MongoDB.
+See [compatibility](./docs/COMPATIBILITY.md#transactions-partial-emulated-on-cloudflare) for the differences from MongoDB.
 
 ### Benchmarks
 
@@ -134,7 +134,7 @@ raw SQL are a menu item away when you want them. See [the CLI docs](./docs/CLI.m
 | TypeScript, strict mode                             | ✅          | ✅                       | ✅                   | ⚠️ (community types)        | ⚠️ (community types)        | ✅      |
 | Actively maintained                                 | ✅          | ✅                       | ✅                   | ⚠️ (little recent activity) | ⚠️ (varies; check the repo) | ✅      |
 
-_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has partial multi-document transaction support (`session.withTransaction` on the Node and sql.js adapters; not Cloudflare yet; see [compatibility](./docs/COMPATIBILITY.md)); an experimental opt-in retry for busy writers is available via `withTransaction(fn, { maxRetries })`._
+_Comparison reflects our understanding of each project's documentation at the time of writing and may be out of date; check each project for current details. MongoLite supports a subset of MongoDB's aggregation stages and has partial multi-document transaction support (`session.withTransaction` on the Node and sql.js adapters, emulated with an undo log on Cloudflare; see [compatibility](./docs/COMPATIBILITY.md)); an experimental opt-in retry for busy writers is available via `withTransaction(fn, { maxRetries })`._
 
 MongoLite's niche: the MongoDB query API you already know, running anywhere SQLite runs — a local file, an in-memory test database, the browser, or a Cloudflare Durable Object — without standing up a MongoDB server.
 
