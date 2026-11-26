@@ -31,6 +31,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-26: when blocked (a): added tests for db.ts wrapper helpers (getDbInstance, prepare, begin/commit/rollback)
 - 2026-11-25: when blocked (a): added unit tests for cli/format.ts rendering helpers (was 83% line coverage)
 - 2026-11-24: when blocked (a): added direct unit tests for aggregation.ts expressions (was 60% line coverage)
 - 2026-11-23: README and API.md now describe Cloudflare transactions (undo log) as in 1.7.0 instead of 'throws'
