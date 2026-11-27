@@ -9,7 +9,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 ## Monitor
 - Cloudflare transactions (1.7.0) not covered by tests: recovery after a real eviction mid-transaction, and concurrent requests during an open transaction.
 - Watch-only merge gate (`autopilot-gate.yml`): it comments on `claude/autopilot-*` PRs and never merges. Merging rules are unchanged. Leave its workflow, script and `REVIEW.md` alone.
-- package.json `overrides` (minimatch ^11, glob ^14) are only for the dev toolchain (c8, eslint). Drop them once c8/test-exclude ship fixed ranges: `npm view test-exclude dependencies`
+- package.json `overrides` (minimatch ^11, glob ^14) are only for the dev toolchain (c8, eslint). Drop them once c8/test-exclude ship fixed ranges: `npm view test-exclude dependencies` (checked 2026-11-27: test-exclude 8.0.0 still pins glob ^13 / minimatch ^10.2.2; without overrides `npm audit` shows 4 moderate)
 - CI on master: `gh run list --branch master --workflow ci.yml -L 3`
 - Open PRs and their checks: `gh pr list` then `gh pr checks <n>`
 - New issues: `gh issue list --search "created:>YYYY-MM-DD"` (security-audit.yml opens "Security Vulnerability Found in Dependencies" issues)
@@ -31,6 +31,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-27: when blocked (e): re-checked the overrides (still needed, noted in Monitor); health check clean
 - 2026-11-26: when blocked (a): added tests for db.ts wrapper helpers (getDbInstance, prepare, begin/commit/rollback)
 - 2026-11-25: when blocked (a): added unit tests for cli/format.ts rendering helpers (was 83% line coverage)
 - 2026-11-24: when blocked (a): added direct unit tests for aggregation.ts expressions (was 60% line coverage)
