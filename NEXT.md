@@ -31,6 +31,7 @@ The project's working memory. `/next` reads it first and updates it last, every 
 - All changes go through an `autopilot/*` branch and PR; never push to master directly (protection is bypassable by this token).
 
 ## Done
+- 2026-11-28: when blocked (c): refreshed lockfile (eslint 10.16, typescript-eslint 8.74, mongodb-memory-server 11.4, @types/node, prettier config); health check clean
 - 2026-11-27: when blocked (e): re-checked the overrides (still needed, noted in Monitor); health check clean
 - 2026-11-26: when blocked (a): added tests for db.ts wrapper helpers (getDbInstance, prepare, begin/commit/rollback)
 - 2026-11-25: when blocked (a): added unit tests for cli/format.ts rendering helpers (was 83% line coverage)
